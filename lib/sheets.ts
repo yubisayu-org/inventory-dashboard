@@ -45,6 +45,17 @@ export interface OrderRow {
   note: string
 }
 
+/** A row read back from the Duplicate_Form sheet, with its 1-based sheet row number. */
+export interface FormRow {
+  rowNumber: number
+  event: string
+  customer: string
+  items: string
+  unit: number
+  note: string
+  createdAt: string
+}
+
 /** Fetch all dropdown options in a single batchGet API call.
  *  Product sheet columns: A=Product, B=Store, C=IDR price
  *  Stores are derived as unique values from column B.
@@ -78,14 +89,13 @@ export async function getSheetOptions(): Promise<SheetOptions> {
 }
 
 /**
- * Append a new order row to the Duplicate_Form sheet.
+ * Append one or more order rows to the Duplicate_Form sheet in a single API call.
  * Columns: A=Event, B=Customer, C=Items, D=Unit, E=Note, F=Created At
  */
-export async function appendOrder(order: OrderRow): Promise<void> {
+export async function appendOrders(orders: OrderRow[]): Promise<void> {
+  if (orders.length === 0) return
   const sheets = getSheetsClient()
 
-  // duplicate_form columns: A=Event, B=Customer, C=Items, D=Unit, E=Note, F=Created At
-  // No protected columns — single append call, no pre-read needed
   const createdAt = new Date().toLocaleString("id-ID", {
     day: "2-digit",
     month: "2-digit",
@@ -101,7 +111,87 @@ export async function appendOrder(order: OrderRow): Promise<void> {
     valueInputOption: "USER_ENTERED",
     insertDataOption: "INSERT_ROWS",
     requestBody: {
-      values: [[order.event, order.customer, order.items, order.unit, order.note, createdAt]],
+      values: orders.map((o) => [o.event, o.customer, o.items, o.unit, o.note, createdAt]),
+    },
+  })
+}
+
+// Cache the numeric sheet tab ID for Duplicate_Form (needed for row deletion).
+let _duplicateFormSheetId: number | null = null
+
+async function getDuplicateFormSheetId(): Promise<number> {
+  if (_duplicateFormSheetId !== null) return _duplicateFormSheetId
+  const sheets = getSheetsClient()
+  const res = await sheets.spreadsheets.get({
+    spreadsheetId: SPREADSHEET_ID,
+    fields: "sheets.properties",
+  })
+  const sheet = res.data.sheets?.find((s) => s.properties?.title === SHEET_ORDERS)
+  if (sheet?.properties?.sheetId == null) throw new Error(`Sheet "${SHEET_ORDERS}" not found`)
+  _duplicateFormSheetId = sheet.properties.sheetId
+  return _duplicateFormSheetId
+}
+
+/** Read all data rows from Duplicate_Form. Returns rows with their 1-based sheet row numbers. */
+export async function getDuplicateFormRows(): Promise<FormRow[]> {
+  const sheets = getSheetsClient()
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${SHEET_ORDERS}!A2:F`,
+  })
+  const values = res.data.values ?? []
+  return values.map((row, i) => ({
+    rowNumber: i + 2, // row 1 is the header
+    event: String(row[0] ?? ""),
+    customer: String(row[1] ?? ""),
+    items: String(row[2] ?? ""),
+    unit: Number(row[3] ?? 0),
+    note: String(row[4] ?? ""),
+    createdAt: String(row[5] ?? ""),
+  }))
+}
+
+/**
+ * Overwrite columns A–E of a specific row (preserves Created At in column F).
+ * rowNumber is 1-based (row 2 = first data row).
+ */
+export async function updateFormRow(
+  rowNumber: number,
+  data: Pick<FormRow, "event" | "customer" | "items" | "unit" | "note">,
+): Promise<void> {
+  const sheets = getSheetsClient()
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${SHEET_ORDERS}!A${rowNumber}:E${rowNumber}`,
+    valueInputOption: "USER_ENTERED",
+    requestBody: {
+      values: [[data.event, data.customer, data.items, data.unit, data.note]],
+    },
+  })
+}
+
+/**
+ * Delete a row from Duplicate_Form by its 1-based sheet row number.
+ * All subsequent rows shift up automatically.
+ */
+export async function deleteFormRow(rowNumber: number): Promise<void> {
+  const sheets = getSheetsClient()
+  const sheetId = await getDuplicateFormSheetId()
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: SPREADSHEET_ID,
+    requestBody: {
+      requests: [
+        {
+          deleteDimension: {
+            range: {
+              sheetId,
+              dimension: "ROWS",
+              startIndex: rowNumber - 1, // 0-based
+              endIndex: rowNumber,
+            },
+          },
+        },
+      ],
     },
   })
 }

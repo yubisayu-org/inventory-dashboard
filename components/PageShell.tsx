@@ -1,4 +1,4 @@
-import Navbar from "@/components/Navbar"
+import Sidebar from "@/components/Navbar"
 
 interface Props {
   children: React.ReactNode
@@ -7,9 +7,9 @@ interface Props {
 
 export default function PageShell({ children, narrow = false }: Props) {
   return (
-    <div className="min-h-screen bg-cream">
-      <Navbar />
-      <main className={`${narrow ? "max-w-3xl" : "max-w-7xl"} mx-auto px-6 py-10`}>
+    <div className="flex min-h-screen bg-cream">
+      <Sidebar />
+      <main className={`flex-1 min-w-0 ${narrow ? "max-w-3xl" : ""} px-6 py-10`}>
         {children}
       </main>
     </div>

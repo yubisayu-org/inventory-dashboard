@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireSession, requireRole } from "@/lib/api"
-import { appendOrder } from "@/lib/sheets"
+import { appendOrders } from "@/lib/sheets"
 
 export async function POST(req: NextRequest) {
   const { session, error: authError } = await requireSession()
@@ -11,25 +11,31 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json()
-    const { event, customer, items, unit, note } = body
+    const rows = body.rows
 
-    if (!event || !customer || !items || !unit) {
-      return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return NextResponse.json({ error: "rows must be a non-empty array" }, { status: 400 })
     }
 
-    const orderId = `${event} ${customer}`
+    for (const row of rows) {
+      if (!row.event || !row.customer || !row.items || !row.unit) {
+        return NextResponse.json({ error: "Each row requires event, customer, items, and unit" }, { status: 400 })
+      }
+    }
 
-    await appendOrder({
-      event,
-      customer,
-      items,
-      unit: Number(unit),
-      note: note ?? "",
-    })
+    await appendOrders(
+      rows.map((r) => ({
+        event: String(r.event),
+        customer: String(r.customer),
+        items: String(r.items),
+        unit: Number(r.unit),
+        note: r.note ? String(r.note) : "",
+      })),
+    )
 
-    return NextResponse.json({ success: true, orderId })
+    return NextResponse.json({ success: true, count: rows.length })
   } catch (err) {
     console.error("Sheets append error:", err)
-    return NextResponse.json({ error: "Failed to save order" }, { status: 500 })
+    return NextResponse.json({ error: "Failed to save orders" }, { status: 500 })
   }
 }
