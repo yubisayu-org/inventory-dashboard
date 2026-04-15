@@ -15,6 +15,8 @@ interface Props {
   options: SelectOption[]
   placeholder?: string
   disabled?: boolean
+  /** Show a clear/reset option at the top of the list that sets value to "" */
+  clearable?: boolean
 }
 
 export default function SearchableSelect({
@@ -23,6 +25,7 @@ export default function SearchableSelect({
   options,
   placeholder = "Select...",
   disabled = false,
+  clearable = false,
 }: Props) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState("")
@@ -152,6 +155,17 @@ export default function SearchableSelect({
 
           {/* Options list */}
           <ul className="max-h-56 overflow-y-auto">
+            {clearable && value && !search && (
+              <li
+                onMouseDown={() => {
+                  onChange("")
+                  setOpen(false)
+                }}
+                className="px-3 py-2 text-sm text-gray-400 cursor-pointer hover:bg-brand-light transition-colors"
+              >
+                {placeholder}
+              </li>
+            )}
             {filtered.length === 0 ? (
               <li className="px-3 py-3 text-sm text-gray-400 text-center">
                 No results

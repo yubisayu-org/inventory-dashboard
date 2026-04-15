@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireSession, requireRole } from "@/lib/api"
-import { updateFormRow, deleteFormRow } from "@/lib/sheets"
+import { updateFormRow, updateFormRowStage2, updateFormRowStage3, deleteFormRow } from "@/lib/sheets"
 
 type Params = { params: Promise<{ row: string }> }
 
@@ -19,19 +19,47 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
   try {
     const body = await req.json()
-    const { event, customer, items, unit, note } = body
+    const stage = String(body.stage ?? "1")
 
-    if (!event || !customer || !items || !unit) {
-      return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
+    if (stage === "2") {
+      // Owner only
+      if (session.user.role !== "owner") {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+      }
+      const { unitBuy, receipt } = body
+      if (unitBuy == null) {
+        return NextResponse.json({ error: "unitBuy is required" }, { status: 400 })
+      }
+      await updateFormRowStage2(rowNumber, {
+        unitBuy: Number(unitBuy),
+        receipt: receipt ? String(receipt) : "",
+      })
+
+    } else if (stage === "3") {
+      const { unitArrive, unitShip, unitHold } = body
+      if (unitArrive == null || unitShip == null || unitHold == null) {
+        return NextResponse.json({ error: "unitArrive, unitShip, unitHold are required" }, { status: 400 })
+      }
+      await updateFormRowStage3(rowNumber, {
+        unitArrive: Number(unitArrive),
+        unitShip: Number(unitShip),
+        unitHold: Number(unitHold),
+      })
+
+    } else {
+      // Stage 1 — order details
+      const { event, customer, items, unit, note } = body
+      if (!event || !customer || !items || !unit) {
+        return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
+      }
+      await updateFormRow(rowNumber, {
+        event: String(event),
+        customer: String(customer),
+        items: String(items),
+        unit: Number(unit),
+        note: note ? String(note) : "",
+      })
     }
-
-    await updateFormRow(rowNumber, {
-      event: String(event),
-      customer: String(customer),
-      items: String(items),
-      unit: Number(unit),
-      note: note ? String(note) : "",
-    })
 
     return NextResponse.json({ success: true })
   } catch (err) {
