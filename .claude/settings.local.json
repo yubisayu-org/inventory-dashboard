@@ -5,7 +5,8 @@
       "Bash(node_modules/.bin/tsc --noEmit)",
       "Bash(/Users/frhamadiansyah/.nvm/versions/node/v24.13.0/bin/node node_modules/.bin/tsc --noEmit)",
       "Bash(find /Users/frhamadiansyah/Documents/Projects/Yubisayu/inventory-dashboard/node_modules/next/dist/docs/ -path *upgrading* -o -path *breaking*)",
-      "Bash(npm run:*)"
+      "Bash(npm run:*)",
+      "Bash(node -e ':*)"
     ]
   }
 }

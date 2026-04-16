@@ -26,12 +26,14 @@ const NAV_LINKS: { href: string; label: string; roles: Role[]; icon: React.React
     ),
   },
   {
-    href: "/dashboard/input-order",
-    label: "Input Order",
+    href: "/dashboard/form-records",
+    label: "Form Records",
     roles: ["admin", "owner"],
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M12 5v14M5 12h14" />
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
+        <path d="M14 2v6h6" />
+        <path d="M16 13H8" /><path d="M16 17H8" /><path d="M10 9H8" />
       </svg>
     ),
   },
@@ -43,6 +45,32 @@ const NAV_LINKS: { href: string; label: string; roles: Role[]; icon: React.React
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <rect x="9" y="9" width="13" height="13" rx="2" />
         <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+      </svg>
+    ),
+  },
+  {
+    href: "/dashboard/purchasing",
+    label: "Purchasing",
+    roles: ["admin", "owner"],
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z" />
+        <path d="M3 6h18" />
+        <path d="M16 10a4 4 0 0 1-8 0" />
+      </svg>
+    ),
+  },
+  {
+    href: "/dashboard/excess-purchase",
+    label: "Excess Purchase",
+    roles: ["admin", "owner"],
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M3 3h2l.4 2M7 13h10l4-8H5.4" />
+        <circle cx="9" cy="21" r="1" />
+        <circle cx="20" cy="21" r="1" />
+        <path d="M9 13v4" />
+        <path d="M15 13v4" />
       </svg>
     ),
   },

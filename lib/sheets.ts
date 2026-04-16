@@ -272,6 +272,139 @@ export async function updateFormRowStage3(
   })
 }
 
+const SHEET_EXCESS = "Excess_Purchase"
+
+// Cache the numeric sheet tab ID for Excess_Purchase (needed for row deletion).
+let _excessSheetId: number | null = null
+
+async function getExcessSheetId(): Promise<number> {
+  if (_excessSheetId !== null) return _excessSheetId
+  const sheets = getSheetsClient()
+  const res = await sheets.spreadsheets.get({
+    spreadsheetId: SPREADSHEET_ID,
+    fields: "sheets.properties",
+  })
+  const sheet = res.data.sheets?.find((s) => s.properties?.title === SHEET_EXCESS)
+  if (sheet?.properties?.sheetId == null) throw new Error(`Sheet "${SHEET_EXCESS}" not found`)
+  _excessSheetId = sheet.properties.sheetId
+  return _excessSheetId
+}
+
+/** Delete a row from Excess_Purchase by its 1-based sheet row number. */
+export async function deleteExcessRow(rowNumber: number): Promise<void> {
+  const sheets = getSheetsClient()
+  const sheetId = await getExcessSheetId()
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: SPREADSHEET_ID,
+    requestBody: {
+      requests: [
+        {
+          deleteDimension: {
+            range: {
+              sheetId,
+              dimension: "ROWS",
+              startIndex: rowNumber - 1, // 0-based
+              endIndex: rowNumber,
+            },
+          },
+        },
+      ],
+    },
+  })
+}
+
+/** Update the Unit Buy value (column C) of an Excess_Purchase row. */
+export async function updateExcessRowUnitBuy(rowNumber: number, unitBuy: number): Promise<void> {
+  const sheets = getSheetsClient()
+  const updatedAt = formatTimestamp()
+  await sheets.spreadsheets.values.batchUpdate({
+    spreadsheetId: SPREADSHEET_ID,
+    requestBody: {
+      valueInputOption: "USER_ENTERED",
+      data: [
+        { range: `${SHEET_EXCESS}!C${rowNumber}`, values: [[unitBuy]] },
+        { range: `${SHEET_EXCESS}!F${rowNumber}`, values: [[updatedAt]] },
+      ],
+    },
+  })
+}
+
+/**
+ * Append excess purchase rows to the Excess_Purchase sheet.
+ * Columns: A=Event, B=Items, C=Unit Buy, D=Receipt, E=Created At, F=Updated At
+ */
+export async function appendExcessPurchase(
+  rows: { event: string; items: string; unitBuy: number; receipt: string }[],
+): Promise<void> {
+  if (rows.length === 0) return
+  const sheets = getSheetsClient()
+  const createdAt = formatTimestamp()
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${SHEET_EXCESS}!A:F`,
+    valueInputOption: "USER_ENTERED",
+    insertDataOption: "INSERT_ROWS",
+    requestBody: {
+      values: rows.map((r) => [r.event, r.items, r.unitBuy, r.receipt, createdAt, ""]),
+    },
+  })
+}
+
+export interface ExcessRow {
+  rowNumber: number
+  event: string
+  items: string
+  unitBuy: number
+  receipt: string
+  createdAt: string
+  updatedAt: string
+}
+
+/** Read all rows from Excess_Purchase. Returns rows with their 1-based sheet row numbers. */
+export async function getExcessPurchaseRows(): Promise<ExcessRow[]> {
+  const sheets = getSheetsClient()
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${SHEET_EXCESS}!A2:F`,
+  })
+  const values = res.data.values ?? []
+  return values.map((row, i) => ({
+    rowNumber: i + 2,
+    event: String(row[0] ?? ""),
+    items: String(row[1] ?? ""),
+    unitBuy: Number(row[2] ?? 0),
+    receipt: String(row[3] ?? ""),
+    createdAt: String(row[4] ?? ""),
+    updatedAt: String(row[5] ?? ""),
+  }))
+}
+
+export interface PurchaseUpdate {
+  rowNumber: number
+  unitBuy: number
+  receipt: string
+}
+
+/**
+ * Bulk-write unitBuy + receipt for multiple rows in a single Sheets API call.
+ * Also updates the Updated At column for each affected row.
+ */
+export async function bulkUpdatePurchase(updates: PurchaseUpdate[]): Promise<void> {
+  if (updates.length === 0) return
+  const sheets = getSheetsClient()
+  const updatedAt = formatTimestamp()
+  await sheets.spreadsheets.values.batchUpdate({
+    spreadsheetId: SPREADSHEET_ID,
+    requestBody: {
+      valueInputOption: "USER_ENTERED",
+      data: updates.map(({ rowNumber, unitBuy, receipt }) => ({
+        range: `${SHEET_ORDERS}!G${rowNumber}:I${rowNumber}`,
+        values: [[updatedAt, unitBuy, receipt]],
+      })),
+    },
+  })
+}
+
 /**
  * Delete a row from Duplicate_Form by its 1-based sheet row number.
  * All subsequent rows shift up automatically.

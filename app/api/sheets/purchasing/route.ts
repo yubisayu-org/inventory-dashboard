@@ -1,0 +1,120 @@
+import { NextRequest, NextResponse } from "next/server"
+import { requireSession, requireRole } from "@/lib/api"
+import { getDuplicateFormRows, bulkUpdatePurchase, appendExcessPurchase } from "@/lib/sheets"
+
+type ItemLine = { item: string; qty: number }
+type UpdatedRow = { rowNumber: number; customer: string; oldUnitBuy: number; unitBuy: number }
+type FormRows = Awaited<ReturnType<typeof getDuplicateFormRows>>
+
+/** Build a map of item name → eligible rows (sorted chronologically) for a given event. */
+function buildEligibleMap(rows: FormRows, event: string): Map<string, FormRows> {
+  const map = new Map<string, FormRows>()
+  for (const r of rows) {
+    if (r.event !== event) continue
+    if ((r.unitBuy ?? 0) >= r.unit) continue
+    const group = map.get(r.items)
+    if (group) group.push(r)
+    else map.set(r.items, [r])
+  }
+  for (const group of map.values()) group.sort((a, b) => a.rowNumber - b.rowNumber)
+  return map
+}
+
+function distribute(
+  eligible: FormRows,
+  item: string,
+  qty: number,
+  receipt: string,
+): {
+  updates: (UpdatedRow & { receipt: string })[]
+  itemResult: { item: string; rows: UpdatedRow[]; excess: number }
+} {
+  let remaining = qty
+  const updates: (UpdatedRow & { receipt: string })[] = []
+
+  for (const row of eligible) {
+    if (remaining <= 0) break
+    const current = row.unitBuy ?? 0
+    const allocate = Math.min(row.unit - current, remaining)
+    const existingReceipt = row.receipt ?? ""
+    const combinedReceipt = receipt
+      ? (existingReceipt ? `${existingReceipt}, ${receipt}` : receipt)
+      : existingReceipt
+    updates.push({
+      rowNumber: row.rowNumber,
+      customer: row.customer,
+      oldUnitBuy: current,
+      unitBuy: current + allocate,
+      receipt: combinedReceipt,
+    })
+    remaining -= allocate
+  }
+
+  return {
+    updates,
+    itemResult: {
+      item,
+      rows: updates.map(({ receipt: _r, ...rest }) => rest),
+      excess: remaining,
+    },
+  }
+}
+
+export async function POST(req: NextRequest) {
+  const { session, error: authError } = await requireSession()
+  if (authError) return authError
+
+  const roleError = requireRole(session)
+  if (roleError) return roleError
+
+  try {
+    const body = await req.json()
+    const { event, items, receipt } = body as {
+      event: string
+      items: ItemLine[]
+      receipt?: string
+    }
+
+    if (!event || !Array.isArray(items) || items.length === 0) {
+      return NextResponse.json({ error: "event and at least one item are required" }, { status: 400 })
+    }
+
+    for (const line of items) {
+      if (!line.item) return NextResponse.json({ error: "Each line must have an item" }, { status: 400 })
+      const q = Number(line.qty)
+      if (!Number.isFinite(q) || q <= 0) {
+        return NextResponse.json({ error: `qty for "${line.item}" must be a positive number` }, { status: 400 })
+      }
+    }
+
+    const rows = await getDuplicateFormRows()
+    const receiptStr = receipt ? String(receipt) : ""
+    const eligibleMap = buildEligibleMap(rows, event)
+
+    const allUpdates: (UpdatedRow & { receipt: string })[] = []
+    const results: { item: string; rows: UpdatedRow[]; excess: number }[] = []
+    const excessRows: { event: string; items: string; unitBuy: number; receipt: string }[] = []
+
+    for (const line of items) {
+      const eligible = eligibleMap.get(line.item) ?? []
+      const { updates, itemResult } = distribute(eligible, line.item, Number(line.qty), receiptStr)
+      allUpdates.push(...updates)
+      results.push(itemResult)
+      if (itemResult.excess > 0) {
+        excessRows.push({ event, items: line.item, unitBuy: itemResult.excess, receipt: receiptStr })
+      }
+    }
+
+    await Promise.all([
+      bulkUpdatePurchase(
+        allUpdates.map(({ rowNumber, unitBuy, receipt: r }) => ({ rowNumber, unitBuy, receipt: r })),
+      ),
+      appendExcessPurchase(excessRows),
+    ])
+
+    return NextResponse.json({ results })
+  } catch (err) {
+    console.error("Failed to process purchasing:", err)
+    return NextResponse.json({ error: "Failed to process" }, { status: 500 })
+  }
+}

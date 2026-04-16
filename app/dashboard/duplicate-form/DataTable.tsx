@@ -3,51 +3,39 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react"
 import type { FormRow, SheetOptions } from "@/lib/sheets"
 import SearchableSelect from "@/components/SearchableSelect"
-import type { Role } from "@/lib/roles"
+import { useSheetOptions } from "@/hooks/useSheetOptions"
 
 // ---------------------------------------------------------------------------
 // Column definitions
 // ---------------------------------------------------------------------------
 
 type ColumnId =
-  | "index" | "event" | "customer" | "items" | "unit" | "stage"
+  | "index" | "event" | "customer" | "items" | "unit"
   | "note" | "createdAt" | "updatedAt"
-  | "unitBuy" | "receipt"
-  | "unitArrive" | "unitShip" | "unitHold"
   | "actions"
 
 type ColumnDef = {
   id: ColumnId
   label: string
   locked?: boolean
-  ownerOnly?: boolean
   defaultVisible: boolean
   className?: string
 }
 
 const ALL_COLUMNS: ColumnDef[] = [
-  { id: "index",      label: "#",          locked: true,    defaultVisible: true,  className: "w-8" },
-  { id: "event",      label: "Event",                       defaultVisible: true  },
-  { id: "customer",   label: "Customer",                    defaultVisible: true  },
-  { id: "items",      label: "Item",        locked: true,   defaultVisible: true  },
-  { id: "unit",       label: "Qty",                         defaultVisible: true,  className: "w-16" },
-  { id: "stage",      label: "Stage",       locked: true,   defaultVisible: true,  className: "w-36" },
-  { id: "note",       label: "Note",                        defaultVisible: false },
-  { id: "createdAt",  label: "Created At",                  defaultVisible: false },
-  { id: "updatedAt",  label: "Updated At",                  defaultVisible: false },
-  { id: "unitBuy",    label: "Unit Buy",    ownerOnly: true, defaultVisible: false, className: "w-24" },
-  { id: "receipt",    label: "Receipt",     ownerOnly: true, defaultVisible: false },
-  { id: "unitArrive", label: "Arrived",                     defaultVisible: false, className: "w-20" },
-  { id: "unitShip",   label: "Shipped",                     defaultVisible: false, className: "w-20" },
-  { id: "unitHold",   label: "Hold",                        defaultVisible: false, className: "w-20" },
-  { id: "actions",    label: "",            locked: true,   defaultVisible: true,  className: "w-16 text-right" },
+  { id: "index",     label: "#",          locked: true,  defaultVisible: true,  className: "w-8" },
+  { id: "event",     label: "Event",                     defaultVisible: true  },
+  { id: "customer",  label: "Customer",                  defaultVisible: true  },
+  { id: "items",     label: "Item",       locked: true,  defaultVisible: true  },
+  { id: "unit",      label: "Qty",                       defaultVisible: true,  className: "w-16" },
+  { id: "note",      label: "Note",                      defaultVisible: false },
+  { id: "createdAt", label: "Created At",                defaultVisible: false },
+  { id: "updatedAt", label: "Updated At",                defaultVisible: false },
+  { id: "actions",   label: "",           locked: true,  defaultVisible: true,  className: "w-16 text-right" },
 ]
 
-function getVisibleColumns(visibility: Record<ColumnId, boolean>, role: Role | null): ColumnDef[] {
-  return ALL_COLUMNS.filter((col) => {
-    if (col.ownerOnly && role !== "owner") return false
-    return visibility[col.id]
-  })
+function getVisibleColumns(visibility: Record<ColumnId, boolean>): ColumnDef[] {
+  return ALL_COLUMNS.filter((col) => visibility[col.id])
 }
 
 function defaultVisibility(): Record<ColumnId, boolean> {
@@ -57,55 +45,19 @@ function defaultVisibility(): Record<ColumnId, boolean> {
 }
 
 // ---------------------------------------------------------------------------
-// Stage logic
-// ---------------------------------------------------------------------------
-
-type StageKey = "placed" | "purchased" | "partiallyArrived" | "arrived" | "hold" | "shipped" | "incomplete"
-
-type StageDef = { key: StageKey; label: string; dot: string; badge: string; priority: number }
-
-const STAGES: Record<StageKey, StageDef> = {
-  placed:           { key: "placed",           label: "Placed",   dot: "bg-gray-300",    badge: "bg-gray-100 text-gray-500",      priority: 1 },
-  purchased:        { key: "purchased",        label: "Purchased",dot: "bg-yellow-400",  badge: "bg-yellow-50 text-yellow-700",   priority: 2 },
-  partiallyArrived: { key: "partiallyArrived", label: "Partial",  dot: "bg-orange-400",  badge: "bg-orange-50 text-orange-700",   priority: 3 },
-  arrived:          { key: "arrived",          label: "Arrived",  dot: "bg-green-400",   badge: "bg-green-50 text-green-700",     priority: 4 },
-  hold:             { key: "hold",             label: "Hold",     dot: "bg-blue-400",    badge: "bg-blue-50 text-blue-700",       priority: 5 },
-  shipped:          { key: "shipped",          label: "Shipped",  dot: "bg-emerald-500", badge: "bg-emerald-50 text-emerald-800", priority: 6 },
-  incomplete:       { key: "incomplete",       label: "Incomplete",dot: "bg-red-400",    badge: "bg-red-50 text-red-600",         priority: 0 },
-}
-
-function getStage(row: FormRow): StageDef {
-  const buy    = row.unitBuy    ?? 0
-  const arrive = row.unitArrive ?? 0
-  const ship   = row.unitShip   ?? 0
-  const hold   = row.unitHold   ?? 0
-
-  if (buy <= 0) return STAGES.placed
-
-  const hasStage3 = arrive > 0 || ship > 0 || hold > 0
-  if (!hasStage3) return STAGES.purchased
-
-  if (buy === ship && arrive === ship) return STAGES.shipped
-  if (hold > 0)                        return STAGES.hold
-  if (buy === arrive)                  return STAGES.arrived
-  if (arrive > 0 && arrive < buy)      return STAGES.partiallyArrived
-  return STAGES.incomplete
-}
-
-// ---------------------------------------------------------------------------
 // Reducer
 // ---------------------------------------------------------------------------
 
 const PAGE_SIZE = 25
 
 type Filters    = { event: string; customer: string; items: string }
-type SortKey    = "event" | "customer" | "items" | "unit" | "note" | "createdAt" | "stage"
+type SortKey    = "event" | "customer" | "items" | "unit" | "note" | "createdAt"
 type SortDir    = "asc" | "desc"
 type SortConfig = { key: SortKey; direction: SortDir } | null
 
 const SORT_LABELS: Record<SortKey, string> = {
   event: "Event", customer: "Customer", items: "Item",
-  unit: "Qty", note: "Note", createdAt: "Created At", stage: "Stage",
+  unit: "Qty", note: "Note", createdAt: "Created At",
 }
 
 type TableState = {
@@ -216,10 +168,6 @@ function applySort(rows: FormRow[], sort: SortConfig): FormRow[] {
   if (!sort) return rows
   const { key, direction } = sort
   return [...rows].sort((a, b) => {
-    if (key === "stage") {
-      const diff = getStage(a).priority - getStage(b).priority
-      return direction === "asc" ? diff : -diff
-    }
     if (key === "unit") return direction === "asc" ? a.unit - b.unit : b.unit - a.unit
     const aStr = String(a[key as keyof FormRow] ?? "").toLowerCase()
     const bStr = String(b[key as keyof FormRow] ?? "").toLowerCase()
@@ -245,15 +193,22 @@ const TOOLBAR_BTN =
 // Main component
 // ---------------------------------------------------------------------------
 
-export default function DataTable({ role }: { role: Role | null }) {
+type EditForm = { event: string; customer: string; items: string; unit: string; note: string }
+
+export default function DataTable() {
   const [table, dispatch] = useReducer(tableReducer, INITIAL_STATE)
   const [fetchState, setFetchState] = useState<{ loading: boolean; error: string }>({ loading: true, error: "" })
-  const [options, setOptions]       = useState<SheetOptions | null>(null)
-  const [selectedRow, setSelectedRow] = useState<FormRow | null>(null)
+  const options = useSheetOptions()
+  const [editingRowNumber, setEditingRowNumber] = useState<number | null>(null)
+  const [editForm, setEditForm] = useState<EditForm | null>(null)
+  const [editSaving, setEditSaving] = useState(false)
+  const [editError, setEditError] = useState("")
+  const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set())
+  const [bulkDeleting, setBulkDeleting] = useState(false)
 
   const visibleColumns = useMemo(
-    () => getVisibleColumns(table.columnVisibility, role),
-    [table.columnVisibility, role],
+    () => getVisibleColumns(table.columnVisibility),
+    [table.columnVisibility],
   )
 
   const searchedRows = useMemo(() => applySearch(table.rows, table.search),     [table.rows, table.search])
@@ -272,13 +227,6 @@ export default function DataTable({ role }: { role: Role | null }) {
   const hasActiveFilters  = table.filters.event || table.filters.customer || table.filters.items || table.search
   const activeFilterCount = [table.filters.event, table.filters.customer, table.filters.items].filter(Boolean).length
 
-  // Keep selectedRow in sync after table refreshes
-  useEffect(() => {
-    if (!selectedRow) return
-    const updated = table.rows.find((r) => r.rowNumber === selectedRow.rowNumber)
-    setSelectedRow(updated ?? null)
-  }, [table.rows]) // eslint-disable-line react-hooks/exhaustive-deps
-
   const loadRows = useCallback(async () => {
     setFetchState({ loading: true, error: "" })
     try {
@@ -294,11 +242,86 @@ export default function DataTable({ role }: { role: Role | null }) {
 
   useEffect(() => {
     loadRows()
-    fetch("/api/sheets/options")
-      .then((r) => r.json())
-      .then((data: SheetOptions & { error?: string }) => { if (!data.error) setOptions(data) })
-      .catch(() => {})
   }, [loadRows])
+
+  useEffect(() => {
+    setSelectedRows((prev) => (prev.size === 0 ? prev : new Set()))
+  }, [table.currentPage, table.filters, table.search])
+
+  function toggleRow(rowNumber: number) {
+    setSelectedRows((prev) => {
+      const next = new Set(prev)
+      if (next.has(rowNumber)) next.delete(rowNumber)
+      else next.add(rowNumber)
+      return next
+    })
+  }
+
+  const pageRowNumbers = useMemo(() => pagedRows.map((r) => r.rowNumber), [pagedRows])
+  const allPageSelected = pageRowNumbers.length > 0 && pageRowNumbers.every((n) => selectedRows.has(n))
+
+  function toggleAllPage() {
+    setSelectedRows((prev) => {
+      const next = new Set(prev)
+      if (allPageSelected) pageRowNumbers.forEach((n) => next.delete(n))
+      else pageRowNumbers.forEach((n) => next.add(n))
+      return next
+    })
+  }
+
+  async function handleBulkDelete() {
+    if (selectedRows.size === 0) return
+    if (!confirm(`Delete ${selectedRows.size} selected order${selectedRows.size === 1 ? "" : "s"}? This cannot be undone.`)) return
+    setBulkDeleting(true)
+    // Delete highest row numbers first to preserve sheet indices
+    const sorted = [...selectedRows].sort((a, b) => b - a)
+    if (editingRowNumber !== null && selectedRows.has(editingRowNumber)) cancelEdit()
+    try {
+      for (const rowNumber of sorted) {
+        const res = await fetch(`/api/sheets/duplicate-form/${rowNumber}`, { method: "DELETE" })
+        if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? `Failed to delete row ${rowNumber}`) }
+        dispatch({ type: "REMOVE_ROW", rowNumber })
+      }
+      setSelectedRows(new Set())
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Bulk delete failed")
+      await loadRows()
+    } finally {
+      setBulkDeleting(false)
+    }
+  }
+
+  function startEdit(row: FormRow) {
+    setEditingRowNumber(row.rowNumber)
+    setEditForm({ event: row.event, customer: row.customer, items: row.items, unit: String(row.unit), note: row.note })
+    setEditError("")
+    if (table.addDrawerOpen) dispatch({ type: "TOGGLE_ADD_DRAWER" })
+  }
+
+  function cancelEdit() {
+    setEditingRowNumber(null)
+    setEditForm(null)
+    setEditError("")
+  }
+
+  async function saveEdit(rowNumber: number) {
+    if (!editForm) return
+    setEditSaving(true); setEditError("")
+    try {
+      const res = await fetch(`/api/sheets/duplicate-form/${rowNumber}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stage: "1", event: editForm.event, customer: editForm.customer, items: editForm.items, unit: Number(editForm.unit), note: editForm.note }),
+      })
+      if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? "Failed to save") }
+      dispatch({ type: "APPLY_UPDATE", rowNumber, patch: { event: editForm.event, customer: editForm.customer, items: editForm.items, unit: Number(editForm.unit), note: editForm.note } })
+      cancelEdit()
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : "Failed to save")
+    } finally {
+      setEditSaving(false)
+    }
+  }
 
   async function handleDelete(rowNumber: number) {
     if (!confirm("Delete this order? This cannot be undone.")) return
@@ -306,9 +329,8 @@ export default function DataTable({ role }: { role: Role | null }) {
     try {
       const res = await fetch(`/api/sheets/duplicate-form/${rowNumber}`, { method: "DELETE" })
       if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? "Failed to delete") }
-      if (selectedRow?.rowNumber === rowNumber) setSelectedRow(null)
+      if (editingRowNumber === rowNumber) cancelEdit()
       dispatch({ type: "REMOVE_ROW", rowNumber })
-      await loadRows()
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to delete row")
     } finally {
@@ -338,8 +360,6 @@ export default function DataTable({ role }: { role: Role | null }) {
   // Render
   // ---------------------------------------------------------------------------
 
-  const anyDrawerOpen = table.addDrawerOpen || selectedRow !== null
-
   return (
     <div className="flex gap-4 items-start">
       {/* ── Table panel ── */}
@@ -363,9 +383,22 @@ export default function DataTable({ role }: { role: Role | null }) {
 
             <FilterPopover filters={table.filters} filterOptions={filterOptions} activeCount={activeFilterCount} dispatch={dispatch} />
             <SortPopover sort={table.sort} dispatch={dispatch} />
-            <ColumnPopover columns={ALL_COLUMNS} visibility={table.columnVisibility} role={role} dispatch={dispatch} />
+            <ColumnPopover columns={ALL_COLUMNS} visibility={table.columnVisibility} dispatch={dispatch} />
 
             <div className="flex-1" />
+
+            {selectedRows.size > 0 && (
+              <button
+                onClick={handleBulkDelete}
+                disabled={bulkDeleting}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-red-200 text-red-500 hover:bg-red-50 hover:border-red-400 transition-colors disabled:opacity-50"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" />
+                </svg>
+                {bulkDeleting ? "Deleting…" : `Delete ${selectedRows.size}`}
+              </button>
+            )}
 
             <span className="text-xs text-gray-400 shrink-0">
               {sortedRows.length !== table.rows.length ? `${sortedRows.length} of ${table.rows.length}` : table.rows.length}{" "}
@@ -379,7 +412,7 @@ export default function DataTable({ role }: { role: Role | null }) {
             </button>
 
             <button
-              onClick={() => { dispatch({ type: "TOGGLE_ADD_DRAWER" }); setSelectedRow(null) }}
+              onClick={() => { dispatch({ type: "TOGGLE_ADD_DRAWER" }); cancelEdit() }}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-colors ${
                 table.addDrawerOpen ? "bg-brand-light text-brand border border-brand/30" : "bg-brand text-white hover:bg-brand-hover"
               }`}
@@ -407,6 +440,14 @@ export default function DataTable({ role }: { role: Role | null }) {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-cream-border bg-cream text-left">
+                <th className="pl-3 pr-1 py-2 w-8">
+                  <input
+                    type="checkbox"
+                    checked={allPageSelected}
+                    onChange={toggleAllPage}
+                    className="rounded border-gray-300 text-brand focus:ring-brand/30 cursor-pointer"
+                  />
+                </th>
                 {visibleColumns.map((col) => (
                   <th key={col.id} className={`px-3 py-2 text-xs font-medium text-gray-500 ${col.className ?? ""}`}>
                     {col.label}
@@ -417,31 +458,54 @@ export default function DataTable({ role }: { role: Role | null }) {
             <tbody>
               {pagedRows.length === 0 ? (
                 <tr>
-                  <td colSpan={visibleColumns.length} className="px-3 py-12 text-center text-gray-400 text-sm">
+                  <td colSpan={visibleColumns.length + 1} className="px-3 py-12 text-center text-gray-400 text-sm">
                     {table.rows.length === 0 ? "No orders found." : "No orders match the current filters."}
                   </td>
                 </tr>
               ) : (
                 pagedRows.map((row, i) => {
-                  const busy     = table.busyRowNumber === row.rowNumber
-                  const selected = selectedRow?.rowNumber === row.rowNumber
+                  const busy      = table.busyRowNumber === row.rowNumber
+                  const isEditing = editingRowNumber === row.rowNumber
+                  const isSelected = selectedRows.has(row.rowNumber)
                   return (
                     <tr
                       key={row.rowNumber}
-                      onClick={() => { setSelectedRow(row); if (table.addDrawerOpen) dispatch({ type: "TOGGLE_ADD_DRAWER" }) }}
-                      className={`border-b border-cream-border last:border-0 cursor-pointer transition-colors ${
-                        selected  ? "bg-brand-light/40" :
-                        busy      ? "opacity-50 cursor-default" :
-                                    "hover:bg-cream/60"
+                      className={`border-b border-cream-border last:border-0 transition-colors ${
+                        isEditing  ? "bg-brand-light/30" :
+                        isSelected ? "bg-brand-light/20" :
+                        busy       ? "opacity-50" :
+                                     "hover:bg-cream/60"
                       }`}
                     >
+                      <td className="pl-3 pr-1 align-middle py-2.5">
+                        {!isEditing && (
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleRow(row.rowNumber)}
+                            disabled={busy}
+                            className="rounded border-gray-300 text-brand focus:ring-brand/30 cursor-pointer"
+                          />
+                        )}
+                      </td>
                       {visibleColumns.map((col) => (
                         <td
                           key={col.id}
-                          className={`px-3 py-2.5 align-middle ${col.id === "actions" ? "text-right" : ""}`}
-                          onClick={col.id === "actions" ? (e) => e.stopPropagation() : undefined}
+                          className={`px-3 align-middle ${isEditing ? "py-1.5" : "py-2.5"} ${col.id === "actions" ? "text-right" : ""}`}
                         >
-                          <ReadCell col={col} row={row} i={i} pageStart={pageStart} busy={busy} onDelete={handleDelete} />
+                          {isEditing && editForm ? (
+                            <EditCell
+                              col={col} editForm={editForm}
+                              onChange={(patch) => setEditForm((f) => f ? { ...f, ...patch } : f)}
+                              options={options} busy={editSaving} error={editError}
+                              onSave={() => saveEdit(row.rowNumber)}
+                              onCancel={cancelEdit}
+                              onDelete={() => handleDelete(row.rowNumber)}
+                              i={i} pageStart={pageStart}
+                            />
+                          ) : (
+                            <ReadCell col={col} row={row} i={i} pageStart={pageStart} busy={busy} onDelete={handleDelete} onEdit={() => startEdit(row)} />
+                          )}
                         </td>
                       ))}
                     </tr>
@@ -455,7 +519,15 @@ export default function DataTable({ role }: { role: Role | null }) {
         {/* Pagination */}
         {totalPages > 1 && (
           <div className="flex items-center justify-between px-4 py-3 border-t border-cream-border">
-            <p className="text-xs text-gray-400">Page {table.currentPage} of {totalPages}</p>
+            <div className="flex items-center gap-1.5 text-xs text-gray-400">
+              <span>Page</span>
+              <PageJumpInput
+                currentPage={table.currentPage}
+                totalPages={totalPages}
+                onJump={(p) => dispatch({ type: "SET_PAGE", page: p })}
+              />
+              <span>of {totalPages}</span>
+            </div>
             <div className="flex items-center gap-1">
               <PaginationButton onClick={() => dispatch({ type: "SET_PAGE", page: table.currentPage - 1 })} disabled={table.currentPage === 1}>←</PaginationButton>
               {getPageNumbers(table.currentPage, totalPages).map((p, idx) =>
@@ -468,19 +540,6 @@ export default function DataTable({ role }: { role: Role | null }) {
           </div>
         )}
       </div>
-
-      {/* ── Drawers ── */}
-      {selectedRow && !table.addDrawerOpen && (
-        <OrderDetailDrawer
-          row={selectedRow}
-          role={role}
-          options={options}
-          onClose={() => setSelectedRow(null)}
-          onPatch={(patch) => dispatch({ type: "APPLY_UPDATE", rowNumber: selectedRow.rowNumber, patch })}
-          onDeleted={() => { setSelectedRow(null); loadRows() }}
-          onReload={loadRows}
-        />
-      )}
 
       {table.addDrawerOpen && (
         <AddOrderDrawer
@@ -497,13 +556,14 @@ export default function DataTable({ role }: { role: Role | null }) {
 // Read-only cell renderer
 // ---------------------------------------------------------------------------
 
-function ReadCell({ col, row, i, pageStart, busy, onDelete }: {
+function ReadCell({ col, row, i, pageStart, busy, onDelete, onEdit }: {
   col: ColumnDef
   row: FormRow
   i: number
   pageStart: number
   busy: boolean
   onDelete: (n: number) => void
+  onEdit: () => void
 }) {
   switch (col.id) {
     case "index":      return <span className="text-gray-400 text-xs">{pageStart + i + 1}</span>
@@ -511,334 +571,182 @@ function ReadCell({ col, row, i, pageStart, busy, onDelete }: {
     case "customer":   return <span className="text-foreground">{row.customer}</span>
     case "items":      return <span className="text-foreground">{row.items}</span>
     case "unit":       return <span className="text-foreground">{row.unit}</span>
-    case "stage":      return <StageBadge row={row} />
     case "note":       return <span className="text-gray-500 text-xs">{row.note || "—"}</span>
     case "createdAt":  return <span className="text-gray-400 text-xs whitespace-nowrap">{row.createdAt || "—"}</span>
     case "updatedAt":  return <span className="text-gray-400 text-xs whitespace-nowrap">{row.updatedAt || "—"}</span>
-    case "unitBuy":    return <span className="text-foreground">{row.unitBuy ?? "—"}</span>
-    case "receipt":    return <span className="text-foreground truncate max-w-[12rem] block">{row.receipt || "—"}</span>
-    case "unitArrive": return <span className="text-foreground">{row.unitArrive ?? "—"}</span>
-    case "unitShip":   return <span className="text-foreground">{row.unitShip ?? "—"}</span>
-    case "unitHold":   return <span className="text-foreground">{row.unitHold ?? "—"}</span>
     case "actions":
       return busy ? (
-        <span className="text-xs text-gray-400">Working…</span>
+        <span className="text-xs text-gray-400">…</span>
       ) : (
-        <button
-          onClick={() => onDelete(row.rowNumber)}
-          className="text-xs text-red-400 hover:text-red-600 transition-colors"
-        >
-          Delete
-        </button>
+        <div className="flex items-center justify-end gap-1">
+          <button onClick={onEdit} title="Edit" className="p-1 text-gray-400 hover:text-brand transition-colors rounded">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+            </svg>
+          </button>
+          <button onClick={() => onDelete(row.rowNumber)} title="Delete" className="p-1 text-gray-400 hover:text-red-500 transition-colors rounded">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" />
+            </svg>
+          </button>
+        </div>
       )
     default: return null
   }
 }
 
 // ---------------------------------------------------------------------------
-// Stage Badge
+// Inline edit cell renderer
 // ---------------------------------------------------------------------------
 
-function StageBadge({ row }: { row: FormRow }) {
-  const s = getStage(row)
-  return (
-    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${s.badge}`}>
-      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${s.dot}`} />
-      {s.label}
-    </span>
-  )
-}
+const EDIT_INPUT = "w-full border border-cream-border rounded-md px-2 py-1 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand transition-colors"
 
-// ---------------------------------------------------------------------------
-// Order Detail Drawer
-// ---------------------------------------------------------------------------
-
-function OrderDetailDrawer({ row, role, options, onClose, onPatch, onDeleted, onReload }: {
-  row: FormRow
-  role: Role | null
+function EditCell({ col, editForm, onChange, options, busy, error, onSave, onCancel, onDelete, i, pageStart }: {
+  col: ColumnDef
+  editForm: EditForm
+  onChange: (patch: Partial<EditForm>) => void
   options: SheetOptions | null
-  onClose: () => void
-  onPatch: (patch: Partial<FormRow>) => void
-  onDeleted: () => void
-  onReload: () => Promise<void>
+  busy: boolean
+  error: string
+  onSave: () => void
+  onCancel: () => void
+  onDelete: () => void
+  i: number
+  pageStart: number
 }) {
-  // Stage 1 edit state
-  const [editingS1, setEditingS1] = useState(false)
-  const [s1, setS1] = useState({ event: row.event, customer: row.customer, items: row.items, unit: String(row.unit), note: row.note })
-  const [savingS1, setSavingS1]   = useState(false)
-  const [errS1, setErrS1]         = useState("")
+  const customerOptions = useMemo(
+    () => (options?.customers ?? []).map((c) => ({ value: c, label: c })),
+    [options],
+  )
+  const itemOptions = useMemo(
+    () => (options?.items ?? []).map((it) => ({ value: it.name, label: it.name, meta: it.store || undefined })),
+    [options],
+  )
 
-  // Stage 2 form state
-  const [s2, setS2] = useState({ unitBuy: String(row.unitBuy ?? ""), receipt: row.receipt ?? "" })
-  const [savingS2, setSavingS2] = useState(false)
-  const [errS2, setErrS2]       = useState("")
-  const [okS2, setOkS2]         = useState(false)
-
-  // Stage 3 form state
-  const [s3, setS3] = useState({ unitArrive: String(row.unitArrive ?? ""), unitShip: String(row.unitShip ?? ""), unitHold: String(row.unitHold ?? "") })
-  const [savingS3, setSavingS3] = useState(false)
-  const [errS3, setErrS3]       = useState("")
-  const [okS3, setOkS3]         = useState(false)
-
-  // Sync form when row prop updates (after reload)
-  useEffect(() => {
-    setS1({ event: row.event, customer: row.customer, items: row.items, unit: String(row.unit), note: row.note })
-    setS2({ unitBuy: String(row.unitBuy ?? ""), receipt: row.receipt ?? "" })
-    setS3({ unitArrive: String(row.unitArrive ?? ""), unitShip: String(row.unitShip ?? ""), unitHold: String(row.unitHold ?? "") })
-  }, [row])
-
-  async function saveStage1() {
-    if (!s1.event || !s1.customer || !s1.items || !s1.unit) return
-    setSavingS1(true); setErrS1("")
-    try {
-      const res = await fetch(`/api/sheets/duplicate-form/${row.rowNumber}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ stage: "1", event: s1.event, customer: s1.customer, items: s1.items, unit: Number(s1.unit), note: s1.note }),
-      })
-      if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? "Failed to save") }
-      onPatch({ event: s1.event, customer: s1.customer, items: s1.items, unit: Number(s1.unit), note: s1.note })
-      setEditingS1(false)
-      await onReload()
-    } catch (err) {
-      setErrS1(err instanceof Error ? err.message : "Failed to save")
-    } finally {
-      setSavingS1(false)
-    }
-  }
-
-  async function saveStage2() {
-    if (!s2.unitBuy) return
-    setSavingS2(true); setErrS2(""); setOkS2(false)
-    try {
-      const res = await fetch(`/api/sheets/duplicate-form/${row.rowNumber}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ stage: "2", unitBuy: Number(s2.unitBuy), receipt: s2.receipt }),
-      })
-      if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? "Failed to save") }
-      onPatch({ unitBuy: Number(s2.unitBuy), receipt: s2.receipt })
-      setOkS2(true)
-      await onReload()
-    } catch (err) {
-      setErrS2(err instanceof Error ? err.message : "Failed to save")
-    } finally {
-      setSavingS2(false)
-    }
-  }
-
-  async function saveStage3() {
-    if (s3.unitArrive === "" && s3.unitShip === "" && s3.unitHold === "") return
-    const arrive = s3.unitArrive === "" ? 0 : Number(s3.unitArrive)
-    const ship   = s3.unitShip   === "" ? 0 : Number(s3.unitShip)
-    const hold   = s3.unitHold   === "" ? 0 : Number(s3.unitHold)
-    setSavingS3(true); setErrS3(""); setOkS3(false)
-    try {
-      const res = await fetch(`/api/sheets/duplicate-form/${row.rowNumber}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ stage: "3", unitArrive: arrive, unitShip: ship, unitHold: hold }),
-      })
-      if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? "Failed to save") }
-      onPatch({ unitArrive: arrive, unitShip: ship, unitHold: hold })
-      setOkS3(true)
-      await onReload()
-    } catch (err) {
-      setErrS3(err instanceof Error ? err.message : "Failed to save")
-    } finally {
-      setSavingS3(false)
-    }
-  }
-
-  const FIELD_INPUT = "w-full border border-cream-border rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand transition-colors"
-  const LABEL_CLS   = "text-xs text-gray-400 w-24 shrink-0"
-  const VALUE_CLS   = "text-sm text-foreground"
-
-  return (
-    <div className="w-80 shrink-0 rounded-xl border border-cream-border bg-white flex flex-col sticky top-6 max-h-[calc(100vh-6rem)] overflow-y-auto">
-      {/* Header */}
-      <div className="flex items-start justify-between px-4 py-3 border-b border-cream-border sticky top-0 bg-white z-10">
-        <div>
-          <h3 className="text-sm font-semibold text-foreground">Order Details</h3>
-          <p className="text-xs text-gray-400 mt-0.5">
-            Row {row.rowNumber}
-            {row.createdAt && <> · {row.createdAt}</>}
-          </p>
-        </div>
-        <button onClick={onClose} className="text-gray-400 hover:text-brand transition-colors p-0.5 rounded mt-0.5">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
-        </button>
-      </div>
-
-      <div className="p-4 space-y-4">
-
-        {/* ── Section ①: Order ── */}
-        <section className="rounded-lg border border-cream-border overflow-hidden">
-          <div className="flex items-center justify-between px-3 py-2 bg-cream border-b border-cream-border">
-            <span className="text-xs font-medium text-gray-600">① Order</span>
-            {!editingS1 ? (
-              <button onClick={() => setEditingS1(true)} className="text-xs text-brand hover:underline">Edit</button>
-            ) : (
-              <div className="flex gap-2">
-                <button onClick={saveStage1} disabled={savingS1} className="text-xs text-brand font-medium hover:underline disabled:opacity-50">
-                  {savingS1 ? "Saving…" : "Save"}
-                </button>
-                <button onClick={() => { setEditingS1(false); setErrS1("") }} className="text-xs text-gray-400 hover:underline">Cancel</button>
-              </div>
-            )}
-          </div>
-
-          <div className="p-3 space-y-2.5">
-            {editingS1 ? (
-              <>
-                <div>
-                  <label className="text-xs text-gray-500 mb-1 block">Event</label>
-                  <select value={s1.event} onChange={(e) => setS1({ ...s1, event: e.target.value })} className={FIELD_INPUT}>
-                    <option value="">Select...</option>
-                    {(options?.events ?? []).map((ev) => <option key={ev} value={ev}>{ev}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500 mb-1 block">Customer</label>
-                  <SearchableSelect value={s1.customer} onChange={(v) => setS1({ ...s1, customer: v })} options={(options?.customers ?? []).map((c) => ({ value: c, label: c }))} placeholder="Select customer..." />
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500 mb-1 block">Item</label>
-                  <SearchableSelect value={s1.items} onChange={(v) => setS1({ ...s1, items: v })} options={(options?.items ?? []).map((it) => ({ value: it.name, label: it.name, meta: it.store || undefined }))} placeholder="Select item..." />
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500 mb-1 block">Qty</label>
-                  <input type="number" min="1" value={s1.unit} onChange={(e) => setS1({ ...s1, unit: e.target.value })} className={FIELD_INPUT} />
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500 mb-1 block">Note</label>
-                  <input type="text" value={s1.note} onChange={(e) => setS1({ ...s1, note: e.target.value })} placeholder="Optional" className={FIELD_INPUT} />
-                </div>
-                {errS1 && <p className="text-xs text-red-600">{errS1}</p>}
-              </>
-            ) : (
-              <>
-                {[
-                  { label: "Event",    value: row.event },
-                  { label: "Customer", value: row.customer },
-                  { label: "Item",     value: row.items },
-                  { label: "Qty",      value: String(row.unit) },
-                  { label: "Note",     value: row.note || "—" },
-                ].map(({ label, value }) => (
-                  <div key={label} className="flex items-start gap-3">
-                    <span className={LABEL_CLS}>{label}</span>
-                    <span className={VALUE_CLS}>{value}</span>
-                  </div>
-                ))}
-              </>
-            )}
-          </div>
-        </section>
-
-        {/* ── Section ②: Purchase (owner only) ── */}
-        {role === "owner" && (
-          <section className="rounded-lg border border-cream-border overflow-hidden">
-            <div className="flex items-center justify-between px-3 py-2 bg-cream border-b border-cream-border">
-              <span className="text-xs font-medium text-gray-600">② Purchase</span>
-              <span className="text-[10px] text-gray-400 bg-white border border-cream-border rounded px-1.5 py-0.5">Owner only</span>
-            </div>
-            <div className="p-3 space-y-2.5">
-              <div>
-                <label className="text-xs text-gray-500 mb-1 block">Unit Buy</label>
-                <input type="number" min="0" value={s2.unitBuy} onChange={(e) => { setS2({ ...s2, unitBuy: e.target.value }); setOkS2(false); setErrS2("") }} placeholder="e.g. 450000" className={FIELD_INPUT} />
-              </div>
-              <div>
-                <label className="text-xs text-gray-500 mb-1 block">Receipt <span className="text-gray-400 font-normal">(optional)</span></label>
-                <input type="text" value={s2.receipt} onChange={(e) => { setS2({ ...s2, receipt: e.target.value }); setOkS2(false); setErrS2("") }} placeholder="e.g. INV-001" className={FIELD_INPUT} />
-              </div>
-              {errS2 && <p className="text-xs text-red-600">{errS2}</p>}
-              {okS2  && <p className="text-xs text-green-600">Saved</p>}
-              <button
-                onClick={saveStage2}
-                disabled={savingS2 || !s2.unitBuy}
-                className="w-full py-1.5 text-xs font-medium rounded-lg bg-brand text-white hover:bg-brand-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {savingS2 ? "Saving…" : "Save"}
-              </button>
-            </div>
-          </section>
-        )}
-
-        {/* ── Section ③: Fulfillment ── */}
-        <section className="rounded-lg border border-cream-border overflow-hidden">
-          <div className="flex items-center px-3 py-2 bg-cream border-b border-cream-border">
-            <span className="text-xs font-medium text-gray-600">③ Fulfillment</span>
-          </div>
-          <div className="p-3 space-y-2.5">
-            <div>
-              <label className="text-xs text-gray-500 mb-1 block">Arrived</label>
-              <input type="number" min="0" value={s3.unitArrive} onChange={(e) => { setS3({ ...s3, unitArrive: e.target.value }); setOkS3(false); setErrS3("") }} placeholder="0" className={FIELD_INPUT} />
-            </div>
-            <div>
-              <label className="text-xs text-gray-500 mb-1 block">Shipped</label>
-              <input type="number" min="0" value={s3.unitShip} onChange={(e) => { setS3({ ...s3, unitShip: e.target.value }); setOkS3(false); setErrS3("") }} placeholder="0" className={FIELD_INPUT} />
-            </div>
-            <div>
-              <label className="text-xs text-gray-500 mb-1 block">Hold</label>
-              <input type="number" min="0" value={s3.unitHold} onChange={(e) => { setS3({ ...s3, unitHold: e.target.value }); setOkS3(false); setErrS3("") }} placeholder="0" className={FIELD_INPUT} />
-            </div>
-            {errS3 && <p className="text-xs text-red-600">{errS3}</p>}
-            {okS3  && <p className="text-xs text-green-600">Saved</p>}
-            <button
-              onClick={saveStage3}
-              disabled={savingS3 || (s3.unitArrive === "" && s3.unitShip === "" && s3.unitHold === "")}
-              className="w-full py-1.5 text-xs font-medium rounded-lg bg-brand text-white hover:bg-brand-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {savingS3 ? "Saving…" : "Save"}
+  switch (col.id) {
+    case "index":
+      return <span className="text-gray-400 text-xs">{pageStart + i + 1}</span>
+    case "event":
+      return (
+        <select value={editForm.event} onChange={(e) => onChange({ event: e.target.value })} className={EDIT_INPUT}>
+          <option value="">Select...</option>
+          {(options?.events ?? []).map((ev) => <option key={ev} value={ev}>{ev}</option>)}
+        </select>
+      )
+    case "customer":
+      return (
+        <SearchableSelect
+          value={editForm.customer}
+          onChange={(v) => onChange({ customer: v })}
+          options={customerOptions}
+          placeholder="Search customer..."
+        />
+      )
+    case "items":
+      return (
+        <SearchableSelect
+          value={editForm.items}
+          onChange={(v) => onChange({ items: v })}
+          options={itemOptions}
+          placeholder="Search item..."
+        />
+      )
+    case "unit":
+      return (
+        <input
+          type="number" min="1" value={editForm.unit}
+          onChange={(e) => onChange({ unit: e.target.value })}
+          className={EDIT_INPUT}
+          style={{ width: "4rem" }}
+        />
+      )
+    case "note":
+      return (
+        <input
+          type="text" value={editForm.note}
+          onChange={(e) => onChange({ note: e.target.value })}
+          placeholder="Optional"
+          className={EDIT_INPUT}
+        />
+      )
+    case "createdAt":
+    case "updatedAt":
+      return null
+    case "actions":
+      return (
+        <div className="flex flex-col items-end gap-1">
+          <div className="flex items-center gap-1.5">
+            <button onClick={onSave} disabled={busy} className="text-xs text-brand font-medium hover:underline disabled:opacity-50">
+              {busy ? "Saving…" : "Save"}
+            </button>
+            <button onClick={onCancel} className="text-xs text-gray-400 hover:underline">Cancel</button>
+            <button onClick={onDelete} title="Delete" className="p-1 text-gray-400 hover:text-red-500 transition-colors rounded">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" />
+              </svg>
             </button>
           </div>
-        </section>
-
-        {/* Delete */}
-        <button
-          onClick={async () => {
-            if (!confirm("Delete this order? This cannot be undone.")) return
-            const res = await fetch(`/api/sheets/duplicate-form/${row.rowNumber}`, { method: "DELETE" })
-            if (res.ok) onDeleted()
-            else alert("Failed to delete")
-          }}
-          className="w-full py-1.5 text-xs text-red-400 hover:text-red-600 border border-red-200 hover:border-red-400 rounded-lg transition-colors"
-        >
-          Delete order
-        </button>
-      </div>
-    </div>
-  )
+          {error && <p className="text-[11px] text-red-500 text-right">{error}</p>}
+        </div>
+      )
+    default: return null
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Add Order Drawer
 // ---------------------------------------------------------------------------
 
+let _addLineId = 0
+function newAddLine() { return { id: _addLineId++, items: "", unit: "", note: "" } }
+
 function AddOrderDrawer({ options, onClose, onSuccess }: {
   options: SheetOptions | null
   onClose: () => void
   onSuccess: () => Promise<void>
 }) {
-  const [form, setForm]         = useState({ event: "", customer: "", items: "", unit: "", note: "" })
+  const [event, setEvent]       = useState("")
+  const [customer, setCustomer] = useState("")
+  const [lines, setLines]       = useState([newAddLine()])
   const [submitting, setSubmitting] = useState(false)
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null)
 
-  function setField(field: string, value: string) { setForm((f) => ({ ...f, [field]: value })); setFeedback(null) }
+  const customerOptions = useMemo(
+    () => (options?.customers ?? []).map((c) => ({ value: c, label: c })),
+    [options],
+  )
+  const itemOptions = useMemo(
+    () => (options?.items ?? []).map((it) => ({ value: it.name, label: it.name, meta: it.store || undefined })),
+    [options],
+  )
+
+  function updateLine(id: number, field: "items" | "unit" | "note", value: string) {
+    setLines((prev) => prev.map((l) => l.id === id ? { ...l, [field]: value } : l))
+    setFeedback(null)
+  }
+  function addLine()            { setLines((prev) => [...prev, newAddLine()]) }
+  function removeLine(id: number) { setLines((prev) => prev.filter((l) => l.id !== id)) }
+
+  const canSubmit = Boolean(event) && Boolean(customer) &&
+    lines.length > 0 && lines.every((l) => l.items && l.unit && Number(l.unit) > 0)
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!form.event || !form.customer || !form.items || !form.unit) return
+    if (!canSubmit) return
     setSubmitting(true); setFeedback(null)
     try {
       const res = await fetch("/api/sheets/orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows: [{ event: form.event, customer: form.customer, items: form.items, unit: Number(form.unit), note: form.note }] }),
+        body: JSON.stringify({
+          rows: lines.map((l) => ({ event, customer, items: l.items, unit: Number(l.unit), note: l.note })),
+        }),
       })
       if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? "Failed to save") }
-      setFeedback({ type: "success", message: "Order added" })
-      setForm({ event: "", customer: "", items: "", unit: "", note: "" })
+      const count = lines.length
+      setFeedback({ type: "success", message: `${count} order${count === 1 ? "" : "s"} added` })
+      setEvent(""); setCustomer(""); setLines([newAddLine()])
       await onSuccess()
     } catch (err) {
       setFeedback({ type: "error", message: err instanceof Error ? err.message : "Failed to save" })
@@ -859,33 +767,91 @@ function AddOrderDrawer({ options, onClose, onSuccess }: {
         </button>
       </div>
       <form onSubmit={handleSubmit} className="p-4 space-y-4">
+        {/* Event */}
         <div>
           <label className={LABEL}>Event <span className="text-brand">*</span></label>
-          <select value={form.event} onChange={(e) => setField("event", e.target.value)} required className={DINPUT}>
+          <select value={event} onChange={(e) => { setEvent(e.target.value); setFeedback(null) }} required className={DINPUT}>
             <option value="">Select event...</option>
             {(options?.events ?? []).map((ev) => <option key={ev} value={ev}>{ev}</option>)}
           </select>
         </div>
+
+        {/* Customer */}
         <div>
           <label className={LABEL}>Customer <span className="text-brand">*</span></label>
-          <SearchableSelect value={form.customer} onChange={(v) => setField("customer", v)} options={(options?.customers ?? []).map((c) => ({ value: c, label: c }))} placeholder="Search customer..." />
+          <SearchableSelect
+            value={customer}
+            onChange={(v) => { setCustomer(v); setFeedback(null) }}
+            options={customerOptions}
+            placeholder="Search customer..."
+          />
         </div>
+
+        {/* Item lines */}
         <div>
-          <label className={LABEL}>Item <span className="text-brand">*</span></label>
-          <SearchableSelect value={form.items} onChange={(v) => setField("items", v)} options={(options?.items ?? []).map((it) => ({ value: it.name, label: it.name, meta: it.store || undefined }))} placeholder="Search item..." />
+          <div className="flex items-center justify-between mb-1.5">
+            <label className={LABEL + " mb-0"}>Items <span className="text-brand">*</span></label>
+            <button type="button" onClick={addLine} className="text-xs text-brand hover:underline">+ Add item</button>
+          </div>
+          <div className="space-y-3">
+            {lines.map((line, idx) => (
+              <div key={line.id} className="rounded-lg border border-cream-border p-2.5 space-y-2 relative">
+                {lines.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => removeLine(line.id)}
+                    className="absolute top-2 right-2 text-gray-300 hover:text-red-400 transition-colors"
+                    aria-label="Remove"
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                      <path d="M18 6 6 18M6 6l12 12" />
+                    </svg>
+                  </button>
+                )}
+                <div>
+                  <label className={LABEL}>Item {lines.length > 1 ? idx + 1 : ""}</label>
+                  <SearchableSelect
+                    value={line.items}
+                    onChange={(v) => updateLine(line.id, "items", v)}
+                    options={itemOptions}
+                    placeholder="Search item..."
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <div className="flex-1">
+                    <label className={LABEL}>Unit</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={line.unit}
+                      onChange={(e) => updateLine(line.id, "unit", e.target.value)}
+                      placeholder="Qty"
+                      className={DINPUT}
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <label className={LABEL}>Note</label>
+                    <input
+                      type="text"
+                      value={line.note}
+                      onChange={(e) => updateLine(line.id, "note", e.target.value)}
+                      placeholder="Optional"
+                      className={DINPUT}
+                    />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
-        <div>
-          <label className={LABEL}>Unit <span className="text-brand">*</span></label>
-          <input type="number" min="1" value={form.unit} onChange={(e) => setField("unit", e.target.value)} required placeholder="Qty" className={DINPUT} />
-        </div>
-        <div>
-          <label className={LABEL}>Note</label>
-          <input type="text" value={form.note} onChange={(e) => setField("note", e.target.value)} placeholder="Optional" className={DINPUT} />
-        </div>
+
         {feedback && <p className={`text-xs ${feedback.type === "success" ? "text-green-600" : "text-red-600"}`}>{feedback.message}</p>}
-        <button type="submit" disabled={submitting || !form.event || !form.customer || !form.items || !form.unit}
-          className="w-full py-2 text-sm font-medium rounded-lg bg-brand text-white hover:bg-brand-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-          {submitting ? "Saving..." : "Submit Order"}
+        <button
+          type="submit"
+          disabled={submitting || !canSubmit}
+          className="w-full py-2 text-sm font-medium rounded-lg bg-brand text-white hover:bg-brand-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {submitting ? "Saving..." : `Submit ${lines.length > 1 ? `${lines.length} Orders` : "Order"}`}
         </button>
       </form>
     </div>
@@ -950,7 +916,7 @@ function SortPopover({ sort, dispatch }: { sort: SortConfig; dispatch: React.Dis
     return () => document.removeEventListener("mousedown", fn)
   }, [open])
 
-  const sortKeys: SortKey[] = ["event", "customer", "items", "unit", "note", "createdAt", "stage"]
+  const sortKeys: SortKey[] = ["event", "customer", "items", "unit", "note", "createdAt"]
 
   return (
     <div className="relative" ref={ref}>
@@ -997,10 +963,9 @@ function SortPopover({ sort, dispatch }: { sort: SortConfig; dispatch: React.Dis
   )
 }
 
-function ColumnPopover({ columns, visibility, role, dispatch }: {
+function ColumnPopover({ columns, visibility, dispatch }: {
   columns: ColumnDef[]
   visibility: Record<ColumnId, boolean>
-  role: Role | null
   dispatch: React.Dispatch<TableAction>
 }) {
   const [open, setOpen] = useState(false)
@@ -1012,7 +977,7 @@ function ColumnPopover({ columns, visibility, role, dispatch }: {
     return () => document.removeEventListener("mousedown", fn)
   }, [open])
 
-  const toggleable = columns.filter((c) => !c.locked && !(c.ownerOnly && role !== "owner"))
+  const toggleable = columns.filter((c) => !c.locked)
 
   return (
     <div className="relative" ref={ref}>
@@ -1030,7 +995,6 @@ function ColumnPopover({ columns, visibility, role, dispatch }: {
               <label key={col.id} className="flex items-center gap-2.5 px-3 py-1.5 hover:bg-cream cursor-pointer">
                 <input type="checkbox" checked={visibility[col.id]} onChange={() => dispatch({ type: "TOGGLE_COLUMN", column: col.id })} className="accent-brand rounded" />
                 <span className="text-xs text-foreground">{col.label}</span>
-                {col.ownerOnly && <span className="ml-auto text-[10px] text-gray-400">Owner</span>}
               </label>
             ))}
           </div>
@@ -1067,6 +1031,43 @@ function PaginationButton({ children, onClick, disabled = false, active = false 
       className={`min-w-[2rem] h-8 px-2 text-xs rounded-md transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${active ? "bg-brand text-white font-medium" : "border border-cream-border hover:bg-cream text-gray-600"}`}>
       {children}
     </button>
+  )
+}
+
+function PageJumpInput({ currentPage, totalPages, onJump }: {
+  currentPage: number
+  totalPages: number
+  onJump: (page: number) => void
+}) {
+  const [value, setValue] = useState(String(currentPage))
+
+  useEffect(() => { setValue(String(currentPage)) }, [currentPage])
+
+  function commit() {
+    const n = Number(value)
+    if (!Number.isInteger(n) || n < 1) {
+      setValue(String(currentPage))
+      return
+    }
+    const clamped = Math.min(totalPages, Math.max(1, n))
+    if (clamped !== currentPage) onJump(clamped)
+    else setValue(String(currentPage))
+  }
+
+  return (
+    <input
+      type="number"
+      min={1}
+      max={totalPages}
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") { e.preventDefault(); commit(); (e.target as HTMLInputElement).blur() }
+      }}
+      aria-label="Jump to page"
+      className="w-12 text-center border border-cream-border rounded-md px-1 py-1 text-xs text-foreground bg-white focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand transition-colors [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+    />
   )
 }
 
