@@ -1,0 +1,11 @@
+[build]
+  command = "next build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+# The official Next.js runtime. Netlify auto-installs this for detected
+# Next.js sites, but pinning it here keeps the build deterministic.
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
