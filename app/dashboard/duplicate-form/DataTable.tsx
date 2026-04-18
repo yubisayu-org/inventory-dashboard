@@ -229,14 +229,21 @@ export default function DataTable() {
 
   const loadRows = useCallback(async () => {
     setFetchState({ loading: true, error: "" })
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 15_000)
     try {
-      const res  = await fetch("/api/sheets/duplicate-form")
+      const res  = await fetch("/api/sheets/duplicate-form", { signal: controller.signal })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? "Failed to load rows")
       dispatch({ type: "SET_ROWS", rows: data.rows })
       setFetchState({ loading: false, error: "" })
     } catch (err) {
-      setFetchState({ loading: false, error: err instanceof Error ? err.message : "Failed to load rows" })
+      const msg = err instanceof Error && err.name === "AbortError"
+        ? "Request timed out — please retry"
+        : err instanceof Error ? err.message : "Failed to load rows"
+      setFetchState({ loading: false, error: msg })
+    } finally {
+      clearTimeout(timer)
     }
   }, [])
 
