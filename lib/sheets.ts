@@ -405,6 +405,32 @@ export async function bulkUpdatePurchase(updates: PurchaseUpdate[]): Promise<voi
   })
 }
 
+export interface ArriveUpdate {
+  rowNumber: number
+  unitArrive: number
+}
+
+/**
+ * Bulk-write unitArrive for multiple rows. Updates the Updated At column too.
+ * J (unitArrive) and G (updatedAt) are written as separate ranges per row
+ * so the in-between columns H/I (unitBuy, receipt) are not touched.
+ */
+export async function bulkUpdateArrive(updates: ArriveUpdate[]): Promise<void> {
+  if (updates.length === 0) return
+  const sheets = getSheetsClient()
+  const updatedAt = formatTimestamp()
+  await sheets.spreadsheets.values.batchUpdate({
+    spreadsheetId: SPREADSHEET_ID,
+    requestBody: {
+      valueInputOption: "USER_ENTERED",
+      data: updates.flatMap(({ rowNumber, unitArrive }) => [
+        { range: `${SHEET_ORDERS}!J${rowNumber}`, values: [[unitArrive]] },
+        { range: `${SHEET_ORDERS}!G${rowNumber}`, values: [[updatedAt]] },
+      ]),
+    },
+  })
+}
+
 /**
  * Delete a row from Duplicate_Form by its 1-based sheet row number.
  * All subsequent rows shift up automatically.
