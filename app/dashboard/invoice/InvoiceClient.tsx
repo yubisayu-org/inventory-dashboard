@@ -1,0 +1,327 @@
+"use client"
+
+import { useEffect, useState } from "react"
+import type { InvoiceEvent, InvoiceResult } from "@/lib/sheets"
+import { useCopyFeedback } from "@/hooks/useCopyFeedback"
+
+function formatNumber(n: number | null | undefined): string {
+  const v = Number(n)
+  return new Intl.NumberFormat("id-ID").format(Number.isFinite(v) ? v : 0)
+}
+
+const FIELD =
+  "w-full border border-cream-border rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand transition-colors"
+
+export default function InvoiceClient() {
+  const [query, setQuery] = useState("")
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [result, setResult] = useState<InvoiceResult | null>(null)
+  const [searched, setSearched] = useState(false)
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    const trimmed = query.trim()
+    if (!trimmed) return
+    setLoading(true)
+    setError(null)
+    setResult(null)
+    setSearched(true)
+    try {
+      const res = await fetch(`/api/sheets/invoice?customer=${encodeURIComponent(trimmed)}`)
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? "Failed to load")
+      setResult(data as InvoiceResult)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="max-w-3xl">
+      <form
+        onSubmit={handleSubmit}
+        className="rounded-xl border border-cream-border bg-white p-4 flex gap-2 items-center"
+      >
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="@instagram_id"
+          autoComplete="off"
+          className={FIELD}
+        />
+        <button
+          type="submit"
+          disabled={loading || !query.trim()}
+          className="shrink-0 px-4 py-2 rounded-lg bg-brand text-white text-sm font-medium hover:bg-brand/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          {loading ? "Searching…" : "Search"}
+        </button>
+      </form>
+
+      {error && (
+        <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
+
+      {!loading && !error && searched && result && result.events.length === 0 && (
+        <div className="mt-4 rounded-xl border border-cream-border bg-white p-8 text-center text-gray-400 text-sm">
+          No orders found for &quot;{query}&quot;.
+        </div>
+      )}
+
+      {result && result.events.length > 0 && (
+        <div className="mt-6 flex flex-col gap-4">
+          {[...result.events].reverse().map((ev) => (
+            <EventCard key={ev.eventId} event={ev} customer={result.customer} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function EventCard({ event, customer }: { event: InvoiceEvent; customer: string }) {
+  const { eta, status, shipments, showShipments, orders, totals, invoice } = event
+  const shipmentCount = shipments.length
+
+  return (
+    <div className="rounded-xl border border-cream-border bg-white overflow-hidden">
+      {/* Header */}
+      <div className="px-5 py-4 bg-cream border-b border-cream-border">
+        <div className="flex flex-col gap-1">
+          <div className="text-sm font-semibold text-foreground">{customer.toUpperCase()}</div>
+          <div className="flex flex-wrap items-center gap-2 text-sm text-foreground">
+            <span className="font-medium">{event.eventId}</span>
+            {eta && <span className="text-gray-500">• {eta}</span>}
+          </div>
+          {status && (
+            <div className="text-xs text-gray-500">
+              <span className="font-medium text-foreground">Status:</span> {status}
+            </div>
+          )}
+          {showShipments &&
+            shipments.map((s, i) => (
+              <div key={i} className="text-xs text-gray-500">
+                <span className="font-medium text-foreground">
+                  Resi{shipmentCount > 1 ? ` ${i + 1}/${shipmentCount}` : ""}:
+                </span>{" "}
+                <span className="font-mono">{s.resi}</span>
+                {s.tanggalKirim && <span className="ml-2">({s.tanggalKirim})</span>}
+              </div>
+            ))}
+        </div>
+      </div>
+
+      {/* Orders table */}
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs text-gray-500 border-b border-cream-border">
+              <th className="px-4 py-2 font-medium">Order</th>
+              <th className="px-4 py-2 font-medium text-right">Unit</th>
+              <th className="px-4 py-2 font-medium text-right">Price</th>
+              <th className="px-4 py-2 font-medium text-right">Subtotal</th>
+              <th className="px-4 py-2 font-medium text-right">Ready</th>
+            </tr>
+          </thead>
+          <tbody>
+            {[...orders].reverse().map((r, i) => (
+              <tr key={i} className="border-b border-cream-border/60">
+                <td className="px-4 py-2">{r.order}</td>
+                <td className="px-4 py-2 text-right">{r.unit}</td>
+                <td className="px-4 py-2 text-right">{r.price}</td>
+                <td className="px-4 py-2 text-right">{r.subtotal}</td>
+                <td className="px-4 py-2 text-right">{r.unitArrive}</td>
+              </tr>
+            ))}
+            <tr className="font-semibold bg-cream/40">
+              <td className="px-4 py-2">Total</td>
+              <td className="px-4 py-2 text-right">{totals.unit}</td>
+              <td className="px-4 py-2"></td>
+              <td className="px-4 py-2 text-right">{formatNumber(totals.subtotal)}</td>
+              <td className="px-4 py-2 text-right">{totals.arrive}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      {/* Invoice summary */}
+      <InvoiceSummary event={event} />
+    </div>
+  )
+}
+
+
+
+function InvoiceMessageActions({ event }: { event: InvoiceEvent }) {
+  const [open, setOpen] = useState(false)
+  const { copied, copy } = useCopyFeedback()
+  const { message } = event
+
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="shrink-0 px-3 py-1.5 rounded-lg border border-cream-border text-gray-600 text-xs font-medium hover:border-brand hover:text-brand transition-colors"
+      >
+        View message
+      </button>
+      <button
+        type="button"
+        onClick={() => copy(message)}
+        className="shrink-0 px-3 py-1.5 rounded-lg border border-brand text-brand text-xs font-medium hover:bg-brand hover:text-white transition-colors"
+      >
+        {copied ? "Copied!" : "Copy message"}
+      </button>
+      {open && (
+        <InvoiceMessageModal
+          message={message}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </div>
+  )
+}
+
+function InvoiceMessageModal({
+  message,
+  onClose,
+}: {
+  message: string
+  onClose: () => void
+}) {
+  const { copied, copy } = useCopyFeedback()
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose()
+    }
+    document.addEventListener("keydown", onKey)
+    const prev = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    return () => {
+      document.removeEventListener("keydown", onKey)
+      document.body.style.overflow = prev
+    }
+  }, [onClose])
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-xl shadow-xl border border-cream-border w-full max-w-xl max-h-[85vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+      >
+        <div className="px-5 py-3 border-b border-cream-border flex items-center justify-between">
+          <div className="text-sm font-semibold text-foreground">Invoice message</div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="text-gray-400 hover:text-foreground transition-colors"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 6 6 18" />
+              <path d="m6 6 12 12" />
+            </svg>
+          </button>
+        </div>
+        <pre className="px-5 py-4 overflow-auto text-sm text-foreground whitespace-pre-wrap font-sans flex-1">
+          {message}
+        </pre>
+        <div className="px-5 py-3 border-t border-cream-border flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-3 py-1.5 rounded-lg border border-cream-border text-gray-600 text-xs font-medium hover:border-brand hover:text-brand transition-colors"
+          >
+            Close
+          </button>
+          <button
+            type="button"
+            onClick={() => copy(message)}
+            className="px-3 py-1.5 rounded-lg bg-brand text-white text-xs font-medium hover:bg-brand/90 transition-colors"
+          >
+            {copied ? "Copied!" : "Copy message"}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function InvoiceSummary({ event }: { event: InvoiceEvent }) {
+  const { invoice, totals } = event
+  const { subtotalBarang, estimasiOngkir, biayaLainnya, total, pembayaran, sisaPelunasan } =
+    invoice
+
+  const sisaAbs = Math.abs(sisaPelunasan)
+  const isRefund = sisaPelunasan < 0
+  const sisaLabel = isRefund ? "Pengembalian Dana" : "Sisa Pelunasan"
+  const sisaColor = sisaPelunasan <= 0 ? "text-green-700" : "text-red-600"
+
+  return (
+    <div className="px-5 py-4 bg-cream/30 border-t border-cream-border">
+      <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
+        <div className="text-sm font-semibold text-foreground">Invoice</div>
+        <InvoiceMessageActions event={event} />
+      </div>
+      <dl className="text-sm">
+        <Row label="Subtotal Barang" value={`Rp ${formatNumber(subtotalBarang)}`} />
+        <Row label="Estimasi Berat" value={`${formatNumber(totals.weightKg)} kg`} />
+        <Row label="Estimasi Ongkos Kirim" value={`Rp ${formatNumber(estimasiOngkir)}`} />
+        {biayaLainnya > 0 && (
+          <Row label="Diskon" value={`- Rp ${formatNumber(biayaLainnya)}`} />
+        )}
+        {biayaLainnya < 0 && (
+          <Row label="Biaya Lainnya" value={`+ Rp ${formatNumber(Math.abs(biayaLainnya))}`} />
+        )}
+        {total > 0 && (
+          <Row
+            label="Total"
+            value={`Rp ${formatNumber(total)}`}
+            strong
+            separator
+          />
+        )}
+        <Row label="Pembayaran" value={`Rp ${formatNumber(pembayaran)}`} />
+        <Row label={sisaLabel} value={`Rp ${formatNumber(sisaAbs)}`} valueClassName={sisaColor} />
+      </dl>
+    </div>
+  )
+}
+
+function Row({
+  label,
+  value,
+  strong,
+  separator,
+  valueClassName,
+}: {
+  label: string
+  value: string
+  strong?: boolean
+  separator?: boolean
+  valueClassName?: string
+}) {
+  return (
+    <div
+      className={`flex justify-between py-1 ${
+        separator ? "border-t border-cream-border mt-1 pt-2" : ""
+      } ${strong ? "font-semibold" : ""}`}
+    >
+      <dt className="text-gray-600">{label}</dt>
+      <dd className={valueClassName ?? "text-foreground"}>{value}</dd>
+    </div>
+  )
+}

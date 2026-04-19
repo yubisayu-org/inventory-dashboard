@@ -7,6 +7,7 @@ const SHEET_EVENTS = "Events"
 const SHEET_PRODUCTS = "Product"
 const SHEET_CUSTOMERS = "Customer"
 const SHEET_ORDERS = "Duplicate_Form"
+const SHEET_INVOICE = "Order_JanganDisort_DifilterAja"
 
 // Reuse a single client across requests so the OAuth token is cached
 // and not re-fetched on every call.
@@ -455,4 +456,277 @@ export async function deleteFormRow(rowNumber: number): Promise<void> {
       ],
     },
   })
+}
+
+// ---------- Invoice (Order_JanganDisort_DifilterAja) ----------
+//
+// Column layout:
+//   A=Event, B=Customer, C=Items, D=Unit, E=Note,
+//   F=CreatedAt, G=UpdatedAt, H=UnitBuy, I=Receipt,
+//   J=UnitArrive, K=UnitShip, L=UnitHold,
+//   M=OrderID, N=Price, O=Store, P=ForInvoicing,
+//   Q=Subtotal, R=Ongkir(per kg), S=Berat, T=Berat*Unit,
+//   U=ForPackingList, V=(spacer), W=Pembayaran,
+//   X=ETA, Y=Status, Z=TanggalKirim, AA=Resi, AB=Lainnya,
+//   AC=Total, AD=SisaPelunasan, AE=SubTotalBarang, AF=Invoice_DM
+const INV = {
+  EVENT: 0,
+  CUSTOMER: 1,
+  ORDER: 2,
+  UNIT: 3,
+  UNIT_ARRIVE: 9,
+  PRICE: 13,
+  FOR_INVOICING: 15,
+  SUBTOTAL: 16,
+  ONGKIR: 17,
+  BERAT_UNIT: 19,
+  PEMBAYARAN: 22,
+  ETA: 23,
+  STATUS: 24,
+  TANGGAL_KIRIM: 25,
+  RESI: 26,
+  BIAYA_LAINNYA: 27,
+  TOTAL: 28,
+  SISA_PELUNASAN: 29,
+  SUBTOTAL_BARANG: 30,
+} as const
+
+export interface InvoiceOrderLine {
+  order: string
+  unit: number
+  price: string
+  subtotal: string
+  unitArrive: number
+}
+
+export interface InvoiceShipment {
+  resi: string
+  tanggalKirim: string
+}
+
+export interface InvoiceEvent {
+  eventId: string
+  eta: string
+  status: string
+  shipments: InvoiceShipment[]
+  showShipments: boolean
+  orders: InvoiceOrderLine[]
+  totals: { unit: number; subtotal: number; arrive: number; weightKg: number }
+  invoice: {
+    subtotalBarang: number
+    estimasiOngkir: number
+    ongkirPerKg: number
+    biayaLainnya: number
+    total: number
+    pembayaran: number
+    sisaPelunasan: number
+  }
+  message: string
+}
+
+export interface InvoiceResult {
+  customer: string
+  events: InvoiceEvent[]
+}
+
+/** True when the cell is empty or a placeholder ("N/A", "#N/A", "-"). */
+function isBlankCell(v: unknown): boolean {
+  if (v == null) return true
+  const s = String(v).trim()
+  if (s === "") return true
+  const u = s.toUpperCase()
+  return u === "N/A" || u === "#N/A" || u === "-"
+}
+
+function parseInvoiceNum(v: unknown): number {
+  if (isBlankCell(v)) return 0
+  return parseFloat(String(v).replace(/,/g, "")) || 0
+}
+
+/** Read a string cell, returning "" for blank/placeholder values. */
+function readStringCell(v: unknown): string {
+  return isBlankCell(v) ? "" : String(v).trim()
+}
+
+/** Strip leading apostrophe variants Sheets prepends to force text formatting. */
+function cleanResi(s: string): string {
+  return s.trim().replace(/^[\u0027\u2018\u2019\u02B9\u0060]+/, "")
+}
+
+function parseShipments(
+  resiRaw: string,
+  tanggalRaw: string,
+  status: string,
+): { shipments: InvoiceShipment[]; showShipments: boolean } {
+  const resiList = resiRaw ? resiRaw.split("\n").map(cleanResi).filter(Boolean) : []
+  const tanggalList = tanggalRaw
+    ? tanggalRaw.split("\n").map((s) => s.trim()).filter(Boolean)
+    : []
+  const shipments = resiList.map((resi, i) => ({ resi, tanggalKirim: tanggalList[i] || "" }))
+  const showShipments =
+    shipments.length > 0 && (status === "Completed" || status.includes("Shipped"))
+  return { shipments, showShipments }
+}
+
+function formatIdrNumber(n: number | null | undefined): string {
+  const v = Number(n)
+  return new Intl.NumberFormat("id-ID").format(Number.isFinite(v) ? v : 0)
+}
+
+function buildInvoiceMessage(
+  event: Omit<InvoiceEvent, "message">,
+  customer: string,
+): string {
+  const { orders, totals, invoice } = event
+  const handle = customer.startsWith("@") ? customer : `@${customer}`
+  const produkLines = orders.map((o) => `${o.order} x ${o.unit}`).join("\n")
+
+  const perKgCandidate = Number(invoice.ongkirPerKg)
+  const perKg =
+    Number.isFinite(perKgCandidate) && perKgCandidate > 0
+      ? perKgCandidate
+      : totals.weightKg > 0
+        ? Math.round(invoice.estimasiOngkir / totals.weightKg)
+        : 0
+
+  return [
+    "INVOICE",
+    `${event.eventId} ${handle}`,
+    "",
+    "Produk:",
+    produkLines,
+    "",
+    `Subtotal Barang: Rp ${formatIdrNumber(invoice.subtotalBarang)}`,
+    `Estimasi Ongkir: ${formatIdrNumber(totals.weightKg)} kg x Rp ${formatIdrNumber(perKg)}`,
+    "",
+    `Pelunasan: Rp ${formatIdrNumber(invoice.sisaPelunasan)}`,
+    "",
+    "Rekening an Shinta Michiko:",
+    "Bank Jago (Artos) 103382719370",
+    "Bank Central Asia 4419051991 ",
+    "",
+    "Apabila memesan lebih dari 1 barang, transfer boleh digabung.",
+    "",
+    "Cek rekapan mandiri https://yubisayu-invoice.netlify.app/",
+    "",
+    "Jika ada kesalahan/kekurangan rekap, mohon infokan kembali untuk direvisi.",
+  ].join("\n")
+}
+
+function buildInvoiceEvents(
+  rows: string[][],
+  ongkirPerKg: number,
+  customer: string,
+): InvoiceEvent[] {
+  const groups: Record<string, string[][]> = {}
+  const order: string[] = []
+  for (const row of rows) {
+    const eid = row[INV.EVENT] || ""
+    if (!groups[eid]) {
+      groups[eid] = []
+      order.push(eid)
+    }
+    groups[eid].push(row)
+  }
+
+  return order.map((eid) => {
+    const group = groups[eid]
+
+    const orders: InvoiceOrderLine[] = group.map((row) => ({
+      order: readStringCell(row[INV.FOR_INVOICING]) || readStringCell(row[INV.ORDER]),
+      unit: parseInvoiceNum(row[INV.UNIT]),
+      price: readStringCell(row[INV.PRICE]),
+      subtotal: readStringCell(row[INV.SUBTOTAL]),
+      unitArrive: parseInvoiceNum(row[INV.UNIT_ARRIVE]),
+    }))
+
+    const totalUnit = orders.reduce((s, o) => s + o.unit, 0)
+    const totalSubtotal = group.reduce((s, r) => s + parseInvoiceNum(r[INV.SUBTOTAL]), 0)
+    const totalArrive = orders.reduce((s, o) => s + o.unitArrive, 0)
+    const totalBeratUnit = group.reduce((s, r) => s + parseInvoiceNum(r[INV.BERAT_UNIT]), 0)
+    const weightKg = Math.ceil(totalBeratUnit / 1000)
+    const estimasiOngkir = ongkirPerKg * weightKg
+
+    // Invoice totals: prefer the first row that actually has the value filled,
+    // not blindly row[0] (which can be "N/A" when only one row of the event has
+    // the summary columns populated).
+    const firstWith = (idx: number): string | undefined =>
+      group.find((r) => !isBlankCell(r[idx]))?.[idx]
+
+    const subtotalBarang = parseInvoiceNum(firstWith(INV.SUBTOTAL_BARANG))
+    const biayaLainnya = parseInvoiceNum(firstWith(INV.BIAYA_LAINNYA))
+    const total = parseInvoiceNum(firstWith(INV.TOTAL))
+    const pembayaran = parseInvoiceNum(firstWith(INV.PEMBAYARAN))
+    const sisaPelunasan = parseInvoiceNum(firstWith(INV.SISA_PELUNASAN))
+
+    const status = readStringCell(firstWith(INV.STATUS))
+    const { shipments, showShipments } = parseShipments(
+      readStringCell(firstWith(INV.RESI)),
+      readStringCell(firstWith(INV.TANGGAL_KIRIM)),
+      status,
+    )
+
+    const base = {
+      eventId: eid,
+      eta: readStringCell(firstWith(INV.ETA)),
+      status,
+      shipments,
+      showShipments,
+      orders,
+      totals: { unit: totalUnit, subtotal: totalSubtotal, arrive: totalArrive, weightKg },
+      invoice: {
+        subtotalBarang: subtotalBarang || totalSubtotal,
+        estimasiOngkir,
+        ongkirPerKg,
+        biayaLainnya,
+        total,
+        pembayaran,
+        sisaPelunasan,
+      },
+    }
+    return { ...base, message: buildInvoiceMessage(base, customer) }
+  })
+}
+
+/**
+ * Look up invoice data for a given customer (Instagram handle) across all events.
+ * Reads the full sheet, filters by customer match (case-insensitive, ignoring @),
+ * then groups by Event.
+ */
+let _invoiceRowsCache: { rows: string[][]; ts: number } | null = null
+const INVOICE_CACHE_TTL = 60_000
+
+async function getInvoiceRows(): Promise<string[][]> {
+  const now = Date.now()
+  if (_invoiceRowsCache && now - _invoiceRowsCache.ts < INVOICE_CACHE_TTL) {
+    return _invoiceRowsCache.rows
+  }
+  const sheets = getSheetsClient()
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${SHEET_INVOICE}!A2:AF`,
+  })
+  const rows = (res.data.values ?? []) as string[][]
+  _invoiceRowsCache = { rows, ts: now }
+  return rows
+}
+
+export async function getInvoiceForCustomer(instagramId: string): Promise<InvoiceResult> {
+  const rows = await getInvoiceRows()
+  if (rows.length === 0) return { customer: "", events: [] }
+
+  const searchId = instagramId.replace(/^@/, "").toLowerCase()
+  const matching = rows.filter((row) => {
+    if (!row || row.every((c) => !c || String(c).trim() === "")) return false
+    const rowIg = String(row[INV.CUSTOMER] || "").replace(/^@/, "").toLowerCase()
+    return rowIg === searchId
+  })
+
+  if (matching.length === 0) return { customer: "", events: [] }
+
+  const customer = readStringCell(matching[0][INV.CUSTOMER])
+  // Some rows leave Ongkir blank or "N/A" — scan until we find the real per-kg rate.
+  const ongkirCell = matching.find((r) => !isBlankCell(r[INV.ONGKIR]))?.[INV.ONGKIR]
+  const ongkirPerKg = parseInvoiceNum(ongkirCell)
+  return { customer, events: buildInvoiceEvents(matching, ongkirPerKg, customer) }
 }

@@ -1,9 +1,11 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react"
-import type { FormRow, SheetOptions } from "@/lib/sheets"
+import type { FormRow, InvoiceResult, SheetOptions } from "@/lib/sheets"
 import SearchableSelect from "@/components/SearchableSelect"
 import { useSheetOptions } from "@/hooks/useSheetOptions"
+import { copyToClipboard } from "@/lib/clipboard"
+import { useCopyFeedback } from "@/hooks/useCopyFeedback"
 
 // ---------------------------------------------------------------------------
 // Column definitions
@@ -563,6 +565,115 @@ export default function DataTable() {
 // Read-only cell renderer
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Inline copy button for text values
+// ---------------------------------------------------------------------------
+
+function CopyableText({ text }: { text: string }) {
+  const { copied, copy } = useCopyFeedback()
+
+  async function handleCopy(e: React.MouseEvent) {
+    e.stopPropagation()
+    await copy(text)
+  }
+
+  return (
+    <span className="inline-flex items-center gap-1 group">
+      <span className="text-foreground">{text}</span>
+      <button
+        type="button"
+        onClick={handleCopy}
+        title="Copy"
+        className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded text-gray-400 hover:text-brand"
+      >
+        {copied ? (
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-green-600">
+            <path d="M20 6 9 17l-5-5" />
+          </svg>
+        ) : (
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+          </svg>
+        )}
+      </button>
+    </span>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Invoice copy button for each row
+// ---------------------------------------------------------------------------
+
+type InvoiceCopyState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "copied" }
+  | { status: "error"; message: string }
+
+function CopyInvoiceRowButton({ row }: { row: FormRow }) {
+  const [state, setState] = useState<InvoiceCopyState>({ status: "idle" })
+
+  useEffect(() => {
+    if (state.status === "idle") return
+    const delay = state.status === "error" ? 3000 : 1500
+    const timer = setTimeout(() => setState({ status: "idle" }), delay)
+    return () => clearTimeout(timer)
+  }, [state.status])
+
+  async function handleClick() {
+    setState({ status: "loading" })
+    try {
+      const res = await fetch(`/api/sheets/invoice?customer=${encodeURIComponent(row.customer)}`)
+      const data: InvoiceResult = await res.json()
+      if (!res.ok) throw new Error((data as { error?: string }).error ?? "Failed")
+
+      const event = data.events.find((e) => e.eventId === row.event)
+      if (!event) throw new Error(`No invoice for ${row.event}`)
+
+      await copyToClipboard(event.message)
+      setState({ status: "copied" })
+    } catch (err) {
+      setState({ status: "error", message: err instanceof Error ? err.message : "Failed" })
+    }
+  }
+
+  const { status } = state
+  const label =
+    status === "loading" ? "…"
+    : status === "copied" ? "✓"
+    : status === "error"  ? "!"
+    : undefined
+
+  return (
+    <button
+      onClick={handleClick}
+      disabled={status === "loading"}
+      title={status === "error" ? state.message : "Copy invoice message"}
+      className={`p-1 transition-colors rounded disabled:opacity-50 ${
+        status === "copied" ? "text-green-600"
+        : status === "error"  ? "text-red-500"
+        : "text-gray-400 hover:text-brand"
+      }`}
+    >
+      {label ? (
+        <span className="text-xs font-medium w-3.5 inline-block text-center">{label}</span>
+      ) : (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
+          <path d="M14 2v6h6" />
+          <path d="M8 13h8" />
+          <path d="M8 17h5" />
+        </svg>
+      )}
+    </button>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Read-only cell renderer
+// ---------------------------------------------------------------------------
+
 function ReadCell({ col, row, i, pageStart, busy, onDelete, onEdit }: {
   col: ColumnDef
   row: FormRow
@@ -575,7 +686,7 @@ function ReadCell({ col, row, i, pageStart, busy, onDelete, onEdit }: {
   switch (col.id) {
     case "index":      return <span className="text-gray-400 text-xs">{pageStart + i + 1}</span>
     case "event":      return <span className="text-foreground">{row.event}</span>
-    case "customer":   return <span className="text-foreground">{row.customer}</span>
+    case "customer":   return <CopyableText text={row.customer} />
     case "items":      return <span className="text-foreground">{row.items}</span>
     case "unit":       return <span className="text-foreground">{row.unit}</span>
     case "note":       return <span className="text-gray-500 text-xs">{row.note || "—"}</span>
@@ -586,6 +697,7 @@ function ReadCell({ col, row, i, pageStart, busy, onDelete, onEdit }: {
         <span className="text-xs text-gray-400">…</span>
       ) : (
         <div className="flex items-center justify-end gap-1">
+          <CopyInvoiceRowButton row={row} />
           <button onClick={onEdit} title="Edit" className="p-1 text-gray-400 hover:text-brand transition-colors rounded">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
