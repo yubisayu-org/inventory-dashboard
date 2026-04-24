@@ -743,7 +743,7 @@ async function getCustomerRows(): Promise<string[][]> {
   return rows
 }
 
-async function lookupCustomerDetail(instagramId: string): Promise<CustomerDetail | null> {
+export async function lookupCustomerDetail(instagramId: string): Promise<CustomerDetail | null> {
   const rows = await getCustomerRows()
   const searchId = instagramId.replace(/^@/, "").toLowerCase()
   const row = rows.find((r) => String(r[0] ?? "").replace(/^@/, "").toLowerCase() === searchId)
@@ -887,7 +887,7 @@ export async function shipCustomerOrders(params: ShipOrdersParams): Promise<{ sh
   const shippingId = String(maxId + 1).padStart(4, "0")
 
   const toShipRows = orders.filter((o) => o.toShip > 0)
-  const invoicingText = toShipRows.map((o) => o.items).join("\n")
+  const invoicingText = toShipRows.map((o) => `${o.rawOrder} x ${o.toShip}`).join("\n")
   const ongkirTotal = ongkirPerKg * weightKg
 
   // Match orders to Duplicate_Form rows by customer + event + items (column C)
@@ -974,7 +974,7 @@ export async function getShippingRecords(): Promise<ShippingRecord[]> {
       rowNumber: i + 2,
       event: String(row[0] ?? ""),
       customer: String(row[1] ?? ""),
-      shippingId: String(row[2] ?? ""),
+      shippingId: String(row[2] ?? "").padStart(4, "0"),
       invoicing: String(row[3] ?? ""),
       weightEstimation: Number(row[4] ?? 0) || 0,
       ongkir: Number(row[5] ?? 0) || 0,

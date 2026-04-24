@@ -2,6 +2,125 @@
 
 import { useEffect, useRef, useState } from "react"
 import type { ShippingRecord } from "@/lib/sheets"
+import { generateShippingLabel } from "@/lib/shipping-label"
+
+function LabelModal({
+  record,
+  onClose,
+}: {
+  record: ShippingRecord
+  onClose: () => void
+}) {
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let url: string | null = null
+    let cancelled = false
+
+    async function generate() {
+      try {
+        const res = await fetch(`/api/sheets/customer?id=${encodeURIComponent(record.customer)}`)
+        const detail = res.ok ? await res.json() : null
+        const blob = await generateShippingLabel({
+          event: record.event,
+          customer: record.customer,
+          shippingId: record.shippingId,
+          dataDiri: detail?.dataDiri ?? "",
+          packingLines: record.invoicing.split("\n").filter(Boolean),
+        })
+        if (cancelled) return
+        url = URL.createObjectURL(blob)
+        setPdfUrl(url)
+      } catch {
+        if (!cancelled) setError("Gagal membuat label")
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+
+    generate()
+    return () => {
+      cancelled = true
+      if (url) URL.revokeObjectURL(url)
+    }
+  }, [record])
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) { if (e.key === "Escape") onClose() }
+    document.addEventListener("keydown", onKey)
+    const prev = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    return () => {
+      document.removeEventListener("keydown", onKey)
+      document.body.style.overflow = prev
+    }
+  }, [onClose])
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-xl shadow-xl border border-cream-border w-full max-w-lg flex flex-col max-h-[90vh]"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+      >
+        {/* Header */}
+        <div className="px-5 py-4 border-b border-cream-border shrink-0">
+          <div className="text-sm font-semibold text-foreground">Label Pengiriman</div>
+          <div className="text-xs text-gray-500 mt-0.5">
+            {record.customer.toUpperCase()} · {record.event}
+            <span className="ml-2 font-mono">#{record.shippingId}</span>
+          </div>
+        </div>
+
+        {/* Body */}
+        {loading && (
+          <div className="flex-1 flex items-center justify-center py-16 text-sm text-gray-400">
+            Membuat label…
+          </div>
+        )}
+        {error && (
+          <div className="flex-1 flex items-center justify-center py-16 text-sm text-red-500">
+            {error}
+          </div>
+        )}
+        {pdfUrl && (
+          <iframe
+            src={pdfUrl}
+            title="Label Pengiriman"
+            className="flex-1 w-full border-0 min-h-0"
+            style={{ minHeight: "400px" }}
+          />
+        )}
+
+        {/* Footer */}
+        <div className="px-5 py-3 border-t border-cream-border flex justify-end gap-2 shrink-0">
+          {pdfUrl && (
+            <a
+              href={pdfUrl}
+              download={`label-${record.shippingId}.pdf`}
+              className="px-3 py-1.5 rounded-lg border border-cream-border text-gray-600 text-xs font-medium hover:border-brand hover:text-brand transition-colors"
+            >
+              Download PDF
+            </a>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-1.5 rounded-lg bg-brand text-white text-xs font-medium hover:bg-brand/90 transition-colors"
+          >
+            Tutup
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 export default function ShipmentsClient() {
   const [data, setData] = useState<ShippingRecord[] | null>(null)
@@ -66,6 +185,7 @@ export default function ShipmentsClient() {
                   <th className="px-4 py-3 font-medium">Terakhir</th>
                   <th className="px-4 py-3 font-medium">Resi</th>
                   <th className="px-4 py-3 font-medium">Tanggal</th>
+                  <th className="px-4 py-3 font-medium"></th>
                 </tr>
               </thead>
               <tbody>
@@ -102,6 +222,7 @@ function ShipmentRow({
   const [value, setValue] = useState(record.trackingNumber)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [showLabel, setShowLabel] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -219,6 +340,23 @@ function ShipmentRow({
         )}
       </td>
       <td className="px-4 py-3 text-xs text-gray-400 whitespace-nowrap">{record.createdAt}</td>
+      <td className="px-4 py-3">
+        <button
+          type="button"
+          onClick={() => setShowLabel(true)}
+          title="Lihat label pengiriman"
+          className="text-gray-400 hover:text-brand transition-colors"
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
+          </svg>
+        </button>
+        {showLabel && (
+          <LabelModal record={record} onClose={() => setShowLabel(false)} />
+        )}
+      </td>
     </tr>
   )
 }

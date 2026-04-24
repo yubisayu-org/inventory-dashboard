@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import type { ShipCustomer, ShipOrdersParams } from "@/lib/sheets"
+import { generateShippingLabel } from "@/lib/shipping-label"
 
 type Segment = "all" | "not_arrived" | "ready" | "shipped"
 
@@ -307,13 +308,16 @@ function ShipConfirmModal({
 }) {
   const [shipping, setShipping] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null)
+  const [shippingId, setShippingId] = useState<string | null>(null)
   const toShipRows = c.orders.filter((o) => o.toShip > 0)
 
-  const closeRef = useRef(onClose)
-  closeRef.current = onClose
+  // After success the backdrop/Escape should trigger onSuccess, not onClose
+  const dismissRef = useRef<() => void>(onClose)
+  dismissRef.current = pdfUrl ? onSuccess : onClose
 
   useEffect(() => {
-    function onKey(e: KeyboardEvent) { if (e.key === "Escape") closeRef.current() }
+    function onKey(e: KeyboardEvent) { if (e.key === "Escape") dismissRef.current() }
     document.addEventListener("keydown", onKey)
     const prev = document.body.style.overflow
     document.body.style.overflow = "hidden"
@@ -322,6 +326,11 @@ function ShipConfirmModal({
       document.body.style.overflow = prev
     }
   }, [])
+
+  // Revoke object URL on unmount to avoid memory leaks
+  useEffect(() => {
+    return () => { if (pdfUrl) URL.revokeObjectURL(pdfUrl) }
+  }, [pdfUrl])
 
   async function handleConfirm() {
     setShipping(true)
@@ -347,7 +356,18 @@ function ShipConfirmModal({
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? "Failed")
-      onSuccess()
+
+      const sid: string = data.shippingId
+      setShippingId(sid)
+
+      const blob = await generateShippingLabel({
+        event: c.event,
+        customer: c.customer,
+        shippingId: sid,
+        dataDiri: c.customerDetail?.dataDiri ?? "",
+        packingLines: toShipRows.map((o) => `${o.rawOrder} x ${o.toShip}`),
+      })
+      setPdfUrl(URL.createObjectURL(blob))
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to ship")
       setShipping(false)
@@ -357,82 +377,118 @@ function ShipConfirmModal({
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
-      onClick={onClose}
+      onClick={() => dismissRef.current()}
     >
       <div
-        className="bg-white rounded-xl shadow-xl border border-cream-border w-full max-w-md"
+        className="bg-white rounded-xl shadow-xl border border-cream-border w-full max-w-lg flex flex-col max-h-[90vh]"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
       >
-        <div className="px-5 py-4 border-b border-cream-border">
-          <div className="text-sm font-semibold text-foreground">Konfirmasi Pengiriman</div>
-          <div className="text-xs text-gray-500 mt-0.5">{c.customer.toUpperCase()} · {c.event}</div>
+        {/* Header */}
+        <div className="px-5 py-4 border-b border-cream-border shrink-0">
+          <div className="text-sm font-semibold text-foreground">
+            {pdfUrl ? "Label Pengiriman" : "Konfirmasi Pengiriman"}
+          </div>
+          <div className="text-xs text-gray-500 mt-0.5">
+            {c.customer.toUpperCase()} · {c.event}
+            {shippingId && <span className="ml-2 font-mono">#{shippingId}</span>}
+          </div>
         </div>
 
-        <div className="px-5 py-4 flex flex-col gap-4">
-          {/* Items */}
-          <div>
-            <div className="text-xs font-medium text-gray-500 mb-2">Item yang dikirim</div>
-            <div className="flex flex-col gap-1">
-              {toShipRows.map((o) => (
-                <div key={o.rowNumber} className="text-sm">
-                  <span className="text-foreground">{o.items}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Address */}
-          {c.customerDetail?.dataDiri && (
+        {/* PDF view */}
+        {pdfUrl ? (
+          <iframe
+            src={pdfUrl}
+            title="Label Pengiriman"
+            className="flex-1 w-full border-0 min-h-0"
+          />
+        ) : (
+          /* Confirm form */
+          <div className="px-5 py-4 flex flex-col gap-4 overflow-y-auto">
+            {/* Items */}
             <div>
-              <div className="text-xs font-medium text-gray-500 mb-1">Alamat pengiriman</div>
-              <pre className="whitespace-pre-wrap font-sans text-sm text-foreground leading-relaxed">
-                {c.customerDetail.dataDiri}
-              </pre>
+              <div className="text-xs font-medium text-gray-500 mb-2">Item yang dikirim</div>
+              <div className="flex flex-col gap-1">
+                {toShipRows.map((o) => (
+                  <div key={o.rowNumber} className="text-sm text-foreground">{o.items}</div>
+                ))}
+              </div>
             </div>
-          )}
 
-          {/* Weight & ongkir */}
-          <div className="rounded-lg bg-cream/50 px-4 py-3 flex flex-col gap-1 text-sm">
-            <div className="flex justify-between">
-              <span className="text-gray-500">Estimasi berat</span>
-              <span className="font-medium">{c.weightKg} kg</span>
+            {/* Address */}
+            {c.customerDetail?.dataDiri && (
+              <div>
+                <div className="text-xs font-medium text-gray-500 mb-1">Alamat pengiriman</div>
+                <pre className="whitespace-pre-wrap font-sans text-sm text-foreground leading-relaxed">
+                  {c.customerDetail.dataDiri}
+                </pre>
+              </div>
+            )}
+
+            {/* Weight & ongkir */}
+            <div className="rounded-lg bg-cream/50 px-4 py-3 flex flex-col gap-1 text-sm">
+              <div className="flex justify-between">
+                <span className="text-gray-500">Estimasi berat</span>
+                <span className="font-medium">{c.weightKg} kg</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">Ongkir/kg</span>
+                <span className="font-medium">Rp {c.ongkirPerKg.toLocaleString("id-ID")}</span>
+              </div>
+              <div className="flex justify-between border-t border-cream-border mt-1 pt-1">
+                <span className="text-gray-500">Total ongkir</span>
+                <span className="font-semibold">Rp {(c.weightKg * c.ongkirPerKg).toLocaleString("id-ID")}</span>
+              </div>
             </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500">Ongkir/kg</span>
-              <span className="font-medium">Rp {c.ongkirPerKg.toLocaleString("id-ID")}</span>
-            </div>
-            <div className="flex justify-between border-t border-cream-border mt-1 pt-1">
-              <span className="text-gray-500">Total ongkir</span>
-              <span className="font-semibold">Rp {(c.weightKg * c.ongkirPerKg).toLocaleString("id-ID")}</span>
-            </div>
+
+            {error && (
+              <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                {error}
+              </div>
+            )}
           </div>
+        )}
 
-          {error && (
-            <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-              {error}
-            </div>
+        {/* Footer */}
+        <div className="px-5 py-3 border-t border-cream-border flex justify-end gap-2 shrink-0">
+          {pdfUrl ? (
+            <>
+              <a
+                href={pdfUrl}
+                download={`label-${shippingId}.pdf`}
+                className="px-3 py-1.5 rounded-lg border border-cream-border text-gray-600 text-xs font-medium hover:border-brand hover:text-brand transition-colors"
+              >
+                Download PDF
+              </a>
+              <button
+                type="button"
+                onClick={onSuccess}
+                className="px-4 py-1.5 rounded-lg bg-brand text-white text-xs font-medium hover:bg-brand/90 transition-colors"
+              >
+                Tutup
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={shipping}
+                className="px-3 py-1.5 rounded-lg border border-cream-border text-gray-600 text-xs font-medium hover:border-brand hover:text-brand transition-colors disabled:opacity-50"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirm}
+                disabled={shipping}
+                className="px-4 py-1.5 rounded-lg bg-brand text-white text-xs font-medium hover:bg-brand/90 transition-colors disabled:opacity-50"
+              >
+                {shipping ? "Mengirim…" : "Konfirmasi Kirim"}
+              </button>
+            </>
           )}
-        </div>
-
-        <div className="px-5 py-3 border-t border-cream-border flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={shipping}
-            className="px-3 py-1.5 rounded-lg border border-cream-border text-gray-600 text-xs font-medium hover:border-brand hover:text-brand transition-colors disabled:opacity-50"
-          >
-            Batal
-          </button>
-          <button
-            type="button"
-            onClick={handleConfirm}
-            disabled={shipping}
-            className="px-4 py-1.5 rounded-lg bg-brand text-white text-xs font-medium hover:bg-brand/90 transition-colors disabled:opacity-50"
-          >
-            {shipping ? "Mengirim…" : "Konfirmasi Kirim"}
-          </button>
         </div>
       </div>
     </div>
