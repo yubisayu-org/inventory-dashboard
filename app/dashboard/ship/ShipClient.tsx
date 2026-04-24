@@ -1,7 +1,7 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
-import type { ShipCustomer } from "@/lib/sheets"
+import { useEffect, useMemo, useRef, useState } from "react"
+import type { ShipCustomer, ShipOrdersParams } from "@/lib/sheets"
 
 type Segment = "all" | "not_arrived" | "ready" | "shipped"
 
@@ -158,7 +158,11 @@ export default function ShipClient() {
             <span className="font-semibold text-foreground">{filtered.length}</span> customer
           </p>
           {filtered.map((c) => (
-            <CustomerCard key={`${c.customer}|${c.event}`} customer={c} />
+            <CustomerCard
+              key={`${c.customer}|${c.event}`}
+              customer={c}
+              onShipped={() => { setSegment("all"); load() }}
+            />
           ))}
         </>
       )}
@@ -166,8 +170,15 @@ export default function ShipClient() {
   )
 }
 
-function CustomerCard({ customer: c }: { customer: ShipCustomer }) {
+function CustomerCard({
+  customer: c,
+  onShipped,
+}: {
+  customer: ShipCustomer
+  onShipped: () => void
+}) {
   const [expanded, setExpanded] = useState(false)
+  const [confirming, setConfirming] = useState(false)
   const { customerDetail } = c
 
   return (
@@ -202,10 +213,24 @@ function CustomerCard({ customer: c }: { customer: ShipCustomer }) {
           )}
         </div>
         {c.totalToShip > 0 && (
-          <div className="shrink-0 text-right">
-            <div className="text-lg font-bold text-foreground">{c.totalToShip}</div>
+          <div className="shrink-0 flex flex-col items-end gap-1">
+            <div className="text-lg font-bold text-foreground leading-none">{c.totalToShip}</div>
             <div className="text-xs text-gray-500">to ship</div>
+            <button
+              type="button"
+              onClick={() => setConfirming(true)}
+              className="mt-1 px-3 py-1.5 rounded-lg bg-brand text-white text-xs font-medium hover:bg-brand/90 transition-colors"
+            >
+              Ship
+            </button>
           </div>
+        )}
+        {confirming && (
+          <ShipConfirmModal
+            customer={c}
+            onClose={() => setConfirming(false)}
+            onSuccess={() => { setConfirming(false); onShipped() }}
+          />
         )}
       </div>
 
@@ -267,6 +292,149 @@ function CustomerCard({ customer: c }: { customer: ShipCustomer }) {
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+function ShipConfirmModal({
+  customer: c,
+  onClose,
+  onSuccess,
+}: {
+  customer: ShipCustomer
+  onClose: () => void
+  onSuccess: () => void
+}) {
+  const [shipping, setShipping] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const toShipRows = c.orders.filter((o) => o.toShip > 0)
+
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) { if (e.key === "Escape") closeRef.current() }
+    document.addEventListener("keydown", onKey)
+    const prev = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    return () => {
+      document.removeEventListener("keydown", onKey)
+      document.body.style.overflow = prev
+    }
+  }, [])
+
+  async function handleConfirm() {
+    setShipping(true)
+    setError(null)
+    const params: ShipOrdersParams = {
+      customer: c.customer,
+      event: c.event,
+      orders: c.orders.map((o) => ({
+        rowNumber: o.rowNumber,
+        items: o.items,
+        rawOrder: o.rawOrder,
+        toShip: o.toShip,
+        unitShip: o.unitShip,
+      })),
+      weightKg: c.weightKg,
+      ongkirPerKg: c.ongkirPerKg,
+    }
+    try {
+      const res = await fetch("/api/sheets/ship", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(params),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? "Failed")
+      onSuccess()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to ship")
+      setShipping(false)
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-xl shadow-xl border border-cream-border w-full max-w-md"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+      >
+        <div className="px-5 py-4 border-b border-cream-border">
+          <div className="text-sm font-semibold text-foreground">Konfirmasi Pengiriman</div>
+          <div className="text-xs text-gray-500 mt-0.5">{c.customer.toUpperCase()} · {c.event}</div>
+        </div>
+
+        <div className="px-5 py-4 flex flex-col gap-4">
+          {/* Items */}
+          <div>
+            <div className="text-xs font-medium text-gray-500 mb-2">Item yang dikirim</div>
+            <div className="flex flex-col gap-1">
+              {toShipRows.map((o) => (
+                <div key={o.rowNumber} className="text-sm">
+                  <span className="text-foreground">{o.items}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Address */}
+          {c.customerDetail?.dataDiri && (
+            <div>
+              <div className="text-xs font-medium text-gray-500 mb-1">Alamat pengiriman</div>
+              <pre className="whitespace-pre-wrap font-sans text-sm text-foreground leading-relaxed">
+                {c.customerDetail.dataDiri}
+              </pre>
+            </div>
+          )}
+
+          {/* Weight & ongkir */}
+          <div className="rounded-lg bg-cream/50 px-4 py-3 flex flex-col gap-1 text-sm">
+            <div className="flex justify-between">
+              <span className="text-gray-500">Estimasi berat</span>
+              <span className="font-medium">{c.weightKg} kg</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-500">Ongkir/kg</span>
+              <span className="font-medium">Rp {c.ongkirPerKg.toLocaleString("id-ID")}</span>
+            </div>
+            <div className="flex justify-between border-t border-cream-border mt-1 pt-1">
+              <span className="text-gray-500">Total ongkir</span>
+              <span className="font-semibold">Rp {(c.weightKg * c.ongkirPerKg).toLocaleString("id-ID")}</span>
+            </div>
+          </div>
+
+          {error && (
+            <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              {error}
+            </div>
+          )}
+        </div>
+
+        <div className="px-5 py-3 border-t border-cream-border flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={shipping}
+            className="px-3 py-1.5 rounded-lg border border-cream-border text-gray-600 text-xs font-medium hover:border-brand hover:text-brand transition-colors disabled:opacity-50"
+          >
+            Batal
+          </button>
+          <button
+            type="button"
+            onClick={handleConfirm}
+            disabled={shipping}
+            className="px-4 py-1.5 rounded-lg bg-brand text-white text-xs font-medium hover:bg-brand/90 transition-colors disabled:opacity-50"
+          >
+            {shipping ? "Mengirim…" : "Konfirmasi Kirim"}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

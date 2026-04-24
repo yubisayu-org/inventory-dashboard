@@ -8,6 +8,7 @@ const SHEET_PRODUCTS = "Product"
 const SHEET_CUSTOMERS = "Customer"
 const SHEET_ORDERS = "Duplicate_Form"
 const SHEET_INVOICE = "Order_JanganDisort_DifilterAja"
+const SHEET_SHIPPING = "Shipping_table"
 
 // Reuse a single client across requests so the OAuth token is cached
 // and not re-fetched on every call.
@@ -529,6 +530,7 @@ export interface ShipOrderLine {
   rowNumber: number
   event: string
   items: string
+  rawOrder: string
   unit: number
   unitArrive: number
   unitShip: number
@@ -541,6 +543,8 @@ export interface ShipCustomer {
   customerDetail: CustomerDetail | null
   orders: ShipOrderLine[]
   totalToShip: number
+  weightKg: number
+  ongkirPerKg: number
 }
 
 export interface CustomerDetail {
@@ -606,7 +610,7 @@ function buildInvoiceMessage(
 ): string {
   const { orders, totals, invoice } = event
   const handle = customer.startsWith("@") ? customer : `@${customer}`
-  const produkLines = orders.map((o) => `${o.order} x ${o.unit}`).join("\n")
+  const produkLines = orders.map((o) => o.order).join("\n")
 
   const perKgCandidate = Number(invoice.ongkirPerKg)
   const perKg =
@@ -809,42 +813,194 @@ export async function getShipOrders(): Promise<ShipCustomer[]> {
     }
   }
 
-  // All rows that have a customer and event (full pipeline view)
-  const active = invoiceRows.filter((r) => {
-    if (!r || r.every((c) => !c || String(c).trim() === "")) return false
-    return !isBlankCell(r[INV.CUSTOMER]) && !isBlankCell(r[INV.EVENT])
-  })
+  // All rows with a customer and event — track actual sheet row (index + 2, header is row 1)
+  type ActiveRow = { row: string[]; sheetRow: number }
+  const active: ActiveRow[] = invoiceRows
+    .map((row, idx) => ({ row, sheetRow: idx + 2 }))
+    .filter(({ row }) => {
+      if (!row || row.every((c) => !c || String(c).trim() === "")) return false
+      return !isBlankCell(row[INV.CUSTOMER]) && !isBlankCell(row[INV.EVENT])
+    })
 
-  const groupMap = new Map<string, { customer: string; event: string; rows: string[][] }>()
-  for (const row of active) {
-    const customer = readStringCell(row[INV.CUSTOMER])
-    const event = readStringCell(row[INV.EVENT])
+  const groupMap = new Map<string, { customer: string; event: string; rows: ActiveRow[] }>()
+  for (const item of active) {
+    const customer = readStringCell(item.row[INV.CUSTOMER])
+    const event = readStringCell(item.row[INV.EVENT])
     const key = `${customer.replace(/^@/, "").toLowerCase()}|${event}`
     if (!groupMap.has(key)) groupMap.set(key, { customer, event, rows: [] })
-    groupMap.get(key)!.rows.push(row)
+    groupMap.get(key)!.rows.push(item)
   }
 
   return Array.from(groupMap.values()).map(({ customer, event, rows }) => {
     const customerKey = customer.replace(/^@/, "").toLowerCase()
-    const orders: ShipOrderLine[] = rows.map((r, i) => {
-      const unitArrive = parseInvoiceNum(r[INV.UNIT_ARRIVE])
-      const unitShip = parseInvoiceNum(r[INV.UNIT_SHIP])
+    const orders: ShipOrderLine[] = rows.map(({ row, sheetRow }) => {
+      const unitArrive = parseInvoiceNum(row[INV.UNIT_ARRIVE])
+      const unitShip = parseInvoiceNum(row[INV.UNIT_SHIP])
       return {
-        rowNumber: i,
+        rowNumber: sheetRow,
         event,
-        items: readStringCell(r[INV.FOR_INVOICING]) || readStringCell(r[INV.ORDER]),
-        unit: parseInvoiceNum(r[INV.UNIT]),
+        items: readStringCell(row[INV.FOR_INVOICING]) || readStringCell(row[INV.ORDER]),
+        rawOrder: readStringCell(row[INV.ORDER]),
+        unit: parseInvoiceNum(row[INV.UNIT]),
         unitArrive,
         unitShip,
         toShip: Math.max(0, unitArrive - unitShip),
       }
     })
+    const totalBeratUnit = rows.reduce((s, { row }) => s + parseInvoiceNum(row[INV.BERAT_UNIT]), 0)
+    const weightKg = Math.ceil(totalBeratUnit / 1000)
+    const ongkirPerKg = parseInvoiceNum(
+      rows.find(({ row }) => !isBlankCell(row[INV.ONGKIR]))?.row[INV.ONGKIR]
+    )
     return {
       customer,
       event,
       customerDetail: detailMap.get(customerKey) ?? null,
       orders,
       totalToShip: orders.reduce((s, o) => s + o.toShip, 0),
+      weightKg,
+      ongkirPerKg,
     }
+  })
+}
+
+export interface ShipOrdersParams {
+  customer: string
+  event: string
+  orders: Array<{ rowNumber: number; items: string; rawOrder: string; toShip: number; unitShip: number }>
+  weightKg: number
+  ongkirPerKg: number
+}
+
+export async function shipCustomerOrders(params: ShipOrdersParams): Promise<{ shippingId: string }> {
+  const { customer, event, orders, weightKg, ongkirPerKg } = params
+  const sheets = getSheetsClient()
+  const now = formatTimestamp()
+  const existingIds = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${SHEET_SHIPPING}!C2:C`,
+  })
+  const maxId = ((existingIds.data.values ?? []) as string[][])
+    .map((r) => parseInt(r[0] ?? "0", 10))
+    .filter(Number.isFinite)
+    .reduce((max, n) => Math.max(max, n), 0)
+  const shippingId = String(maxId + 1).padStart(4, "0")
+
+  const toShipRows = orders.filter((o) => o.toShip > 0)
+  const invoicingText = toShipRows.map((o) => o.items).join("\n")
+  const ongkirTotal = ongkirPerKg * weightKg
+
+  // Match orders to Duplicate_Form rows by customer + event + items (column C)
+  const duplicateRows = await getDuplicateFormRows()
+  const customerKey = customer.replace(/^@/, "").toLowerCase()
+  const unitShipUpdates: Array<{ range: string; values: unknown[][] }> = []
+  for (const order of toShipRows) {
+    const matching = duplicateRows.filter(
+      (r) =>
+        r.customer.replace(/^@/, "").toLowerCase() === customerKey &&
+        r.event === event &&
+        r.items === order.rawOrder,
+    )
+    for (const r of matching) {
+      unitShipUpdates.push({
+        range: `${SHEET_ORDERS}!K${r.rowNumber}`,
+        values: [[(r.unitShip ?? 0) + order.toShip]],
+      })
+    }
+  }
+
+  const ops: Promise<unknown>[] = [
+    // Append row to Shipping_table
+    sheets.spreadsheets.values.append({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${SHEET_SHIPPING}!A:K`,
+      valueInputOption: "USER_ENTERED",
+      insertDataOption: "INSERT_ROWS",
+      requestBody: {
+        values: [[
+          event, customer, shippingId, invoicingText,
+          weightKg, ongkirPerKg, ongkirTotal,
+          true, now, "", "",
+        ]],
+      },
+    }),
+  ]
+
+  if (unitShipUpdates.length > 0) {
+    ops.push(
+      sheets.spreadsheets.values.batchUpdate({
+        spreadsheetId: SPREADSHEET_ID,
+        requestBody: { valueInputOption: "USER_ENTERED", data: unitShipUpdates },
+      }),
+    )
+  }
+
+  await Promise.all(ops)
+
+  // Invalidate invoice cache so next fetch reflects updated unitShip
+  _invoiceRowsCache = null
+
+  return { shippingId }
+}
+
+// Shipping_table columns: A=Event, B=Customer, C=ShippingID, D=Invoicing,
+// E=weight_estimation, F=ongkir, G=ongkir*weight, H=is_last_shipment,
+// I=created_at, J=updated_at, K=tracking_number
+
+export interface ShippingRecord {
+  rowNumber: number
+  event: string
+  customer: string
+  shippingId: string
+  invoicing: string
+  weightEstimation: number
+  ongkir: number
+  ongkirTotal: number
+  isLastShipment: boolean
+  createdAt: string
+  updatedAt: string
+  trackingNumber: string
+}
+
+export async function getShippingRecords(): Promise<ShippingRecord[]> {
+  const sheets = getSheetsClient()
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${SHEET_SHIPPING}!A2:K`,
+  })
+  const rows = (res.data.values ?? []) as string[][]
+  return rows
+    .map((row, i) => ({
+      rowNumber: i + 2,
+      event: String(row[0] ?? ""),
+      customer: String(row[1] ?? ""),
+      shippingId: String(row[2] ?? ""),
+      invoicing: String(row[3] ?? ""),
+      weightEstimation: Number(row[4] ?? 0) || 0,
+      ongkir: Number(row[5] ?? 0) || 0,
+      ongkirTotal: Number(row[6] ?? 0) || 0,
+      isLastShipment: String(row[7] ?? "").toUpperCase() === "TRUE",
+      createdAt: String(row[8] ?? ""),
+      updatedAt: String(row[9] ?? ""),
+      trackingNumber: String(row[10] ?? ""),
+    }))
+    .filter((r) => r.shippingId)
+}
+
+export async function updateTrackingNumber(
+  rowNumber: number,
+  trackingNumber: string,
+): Promise<void> {
+  const sheets = getSheetsClient()
+  const updatedAt = formatTimestamp()
+  await sheets.spreadsheets.values.batchUpdate({
+    spreadsheetId: SPREADSHEET_ID,
+    requestBody: {
+      valueInputOption: "USER_ENTERED",
+      data: [
+        { range: `${SHEET_SHIPPING}!K${rowNumber}`, values: [[trackingNumber]] },
+        { range: `${SHEET_SHIPPING}!J${rowNumber}`, values: [[updatedAt]] },
+      ],
+    },
   })
 }
