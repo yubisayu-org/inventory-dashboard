@@ -475,6 +475,7 @@ const INV = {
   ORDER: 2,
   UNIT: 3,
   UNIT_ARRIVE: 9,
+  UNIT_SHIP: 10,
   PRICE: 13,
   FOR_INVOICING: 15,
   SUBTOTAL: 16,
@@ -524,8 +525,34 @@ export interface InvoiceEvent {
   message: string
 }
 
+export interface ShipOrderLine {
+  rowNumber: number
+  event: string
+  items: string
+  unit: number
+  unitArrive: number
+  unitShip: number
+  toShip: number
+}
+
+export interface ShipCustomer {
+  customer: string
+  event: string
+  customerDetail: CustomerDetail | null
+  orders: ShipOrderLine[]
+  totalToShip: number
+}
+
+export interface CustomerDetail {
+  whatsapp: string
+  dataDiri: string
+  ekspedisi: string
+  ongkosKirim: number
+}
+
 export interface InvoiceResult {
   customer: string
+  customerDetail: CustomerDetail | null
   events: InvoiceEvent[]
 }
 
@@ -693,8 +720,37 @@ function buildInvoiceEvents(
  * Reads the full sheet, filters by customer match (case-insensitive, ignoring @),
  * then groups by Event.
  */
+let _customerRowsCache: { rows: string[][]; ts: number } | null = null
 let _invoiceRowsCache: { rows: string[][]; ts: number } | null = null
 const INVOICE_CACHE_TTL = 60_000
+
+async function getCustomerRows(): Promise<string[][]> {
+  const now = Date.now()
+  if (_customerRowsCache && now - _customerRowsCache.ts < INVOICE_CACHE_TTL) {
+    return _customerRowsCache.rows
+  }
+  const sheets = getSheetsClient()
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${SHEET_CUSTOMERS}!A2:E`,
+  })
+  const rows = (res.data.values ?? []) as string[][]
+  _customerRowsCache = { rows, ts: now }
+  return rows
+}
+
+async function lookupCustomerDetail(instagramId: string): Promise<CustomerDetail | null> {
+  const rows = await getCustomerRows()
+  const searchId = instagramId.replace(/^@/, "").toLowerCase()
+  const row = rows.find((r) => String(r[0] ?? "").replace(/^@/, "").toLowerCase() === searchId)
+  if (!row) return null
+  return {
+    whatsapp: String(row[1] ?? ""),
+    dataDiri: String(row[2] ?? ""),
+    ekspedisi: String(row[3] ?? ""),
+    ongkosKirim: Number(String(row[4] ?? "0").replace(/[^0-9]/g, "")) || 0,
+  }
+}
 
 async function getInvoiceRows(): Promise<string[][]> {
   const now = Date.now()
@@ -712,8 +768,11 @@ async function getInvoiceRows(): Promise<string[][]> {
 }
 
 export async function getInvoiceForCustomer(instagramId: string): Promise<InvoiceResult> {
-  const rows = await getInvoiceRows()
-  if (rows.length === 0) return { customer: "", events: [] }
+  const [rows, customerDetail] = await Promise.all([
+    getInvoiceRows(),
+    lookupCustomerDetail(instagramId),
+  ])
+  if (rows.length === 0) return { customer: "", customerDetail: null, events: [] }
 
   const searchId = instagramId.replace(/^@/, "").toLowerCase()
   const matching = rows.filter((row) => {
@@ -722,11 +781,70 @@ export async function getInvoiceForCustomer(instagramId: string): Promise<Invoic
     return rowIg === searchId
   })
 
-  if (matching.length === 0) return { customer: "", events: [] }
+  if (matching.length === 0) return { customer: "", customerDetail, events: [] }
 
   const customer = readStringCell(matching[0][INV.CUSTOMER])
   // Some rows leave Ongkir blank or "N/A" — scan until we find the real per-kg rate.
   const ongkirCell = matching.find((r) => !isBlankCell(r[INV.ONGKIR]))?.[INV.ONGKIR]
   const ongkirPerKg = parseInvoiceNum(ongkirCell)
-  return { customer, events: buildInvoiceEvents(matching, ongkirPerKg, customer) }
+  return { customer, customerDetail, events: buildInvoiceEvents(matching, ongkirPerKg, customer) }
+}
+
+export async function getShipOrders(): Promise<ShipCustomer[]> {
+  const [invoiceRows, customerRows] = await Promise.all([
+    getInvoiceRows(),
+    getCustomerRows(),
+  ])
+
+  const detailMap = new Map<string, CustomerDetail>()
+  for (const row of customerRows) {
+    const id = String(row[0] ?? "").replace(/^@/, "").toLowerCase()
+    if (id) {
+      detailMap.set(id, {
+        whatsapp: String(row[1] ?? ""),
+        dataDiri: String(row[2] ?? ""),
+        ekspedisi: String(row[3] ?? ""),
+        ongkosKirim: Number(String(row[4] ?? "0").replace(/[^0-9]/g, "")) || 0,
+      })
+    }
+  }
+
+  // All rows that have a customer and event (full pipeline view)
+  const active = invoiceRows.filter((r) => {
+    if (!r || r.every((c) => !c || String(c).trim() === "")) return false
+    return !isBlankCell(r[INV.CUSTOMER]) && !isBlankCell(r[INV.EVENT])
+  })
+
+  const groupMap = new Map<string, { customer: string; event: string; rows: string[][] }>()
+  for (const row of active) {
+    const customer = readStringCell(row[INV.CUSTOMER])
+    const event = readStringCell(row[INV.EVENT])
+    const key = `${customer.replace(/^@/, "").toLowerCase()}|${event}`
+    if (!groupMap.has(key)) groupMap.set(key, { customer, event, rows: [] })
+    groupMap.get(key)!.rows.push(row)
+  }
+
+  return Array.from(groupMap.values()).map(({ customer, event, rows }) => {
+    const customerKey = customer.replace(/^@/, "").toLowerCase()
+    const orders: ShipOrderLine[] = rows.map((r, i) => {
+      const unitArrive = parseInvoiceNum(r[INV.UNIT_ARRIVE])
+      const unitShip = parseInvoiceNum(r[INV.UNIT_SHIP])
+      return {
+        rowNumber: i,
+        event,
+        items: readStringCell(r[INV.FOR_INVOICING]) || readStringCell(r[INV.ORDER]),
+        unit: parseInvoiceNum(r[INV.UNIT]),
+        unitArrive,
+        unitShip,
+        toShip: Math.max(0, unitArrive - unitShip),
+      }
+    })
+    return {
+      customer,
+      event,
+      customerDetail: detailMap.get(customerKey) ?? null,
+      orders,
+      totalToShip: orders.reduce((s, o) => s + o.toShip, 0),
+    }
+  })
 }

@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import type { InvoiceEvent, InvoiceResult } from "@/lib/sheets"
+import type { CustomerDetail, InvoiceEvent, InvoiceResult } from "@/lib/sheets"
 import { useCopyFeedback } from "@/hooks/useCopyFeedback"
 
 function formatNumber(n: number | null | undefined): string {
@@ -77,7 +77,7 @@ export default function InvoiceClient() {
       {result && result.events.length > 0 && (
         <div className="mt-6 flex flex-col gap-4">
           {[...result.events].reverse().map((ev) => (
-            <EventCard key={ev.eventId} event={ev} customer={result.customer} />
+            <EventCard key={ev.eventId} event={ev} customer={result.customer} customerDetail={result.customerDetail} />
           ))}
         </div>
       )}
@@ -85,7 +85,97 @@ export default function InvoiceClient() {
   )
 }
 
-function EventCard({ event, customer }: { event: InvoiceEvent; customer: string }) {
+function CustomerInfoModal({
+  customer,
+  detail,
+  onClose,
+}: {
+  customer: string
+  detail: CustomerDetail
+  onClose: () => void
+}) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose()
+    }
+    document.addEventListener("keydown", onKey)
+    const prev = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    return () => {
+      document.removeEventListener("keydown", onKey)
+      document.body.style.overflow = prev
+    }
+  }, [onClose])
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-xl shadow-xl border border-cream-border w-full max-w-md"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+      >
+        <div className="px-5 py-3 border-b border-cream-border flex items-center justify-between">
+          <div className="text-sm font-semibold text-foreground">{customer.toUpperCase()}</div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="text-gray-400 hover:text-foreground transition-colors"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 6 6 18" />
+              <path d="m6 6 12 12" />
+            </svg>
+          </button>
+        </div>
+        <div className="px-5 py-4 flex flex-col gap-3 text-sm">
+          {detail.whatsapp && (
+            <div>
+              <div className="text-xs font-medium text-gray-500 mb-0.5">WhatsApp</div>
+              <div className="text-foreground">{detail.whatsapp}</div>
+            </div>
+          )}
+          {detail.dataDiri && (
+            <div>
+              <div className="text-xs font-medium text-gray-500 mb-0.5">Data Diri</div>
+              <pre className="whitespace-pre-wrap font-sans text-foreground leading-relaxed">{detail.dataDiri}</pre>
+            </div>
+          )}
+          {detail.ekspedisi && (
+            <div>
+              <div className="text-xs font-medium text-gray-500 mb-0.5">Ekspedisi</div>
+              <div className="text-foreground">{detail.ekspedisi}</div>
+            </div>
+          )}
+        </div>
+        <div className="px-5 py-3 border-t border-cream-border flex justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-3 py-1.5 rounded-lg border border-cream-border text-gray-600 text-xs font-medium hover:border-brand hover:text-brand transition-colors"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function EventCard({
+  event,
+  customer,
+  customerDetail,
+}: {
+  event: InvoiceEvent
+  customer: string
+  customerDetail: CustomerDetail | null
+}) {
+  const [infoOpen, setInfoOpen] = useState(false)
   const { eta, status, shipments, showShipments, orders, totals, invoice } = event
   const shipmentCount = shipments.length
 
@@ -94,7 +184,26 @@ function EventCard({ event, customer }: { event: InvoiceEvent; customer: string 
       {/* Header */}
       <div className="px-5 py-4 bg-cream border-b border-cream-border">
         <div className="flex flex-col gap-1">
-          <div className="text-sm font-semibold text-foreground">{customer.toUpperCase()}</div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-sm font-semibold text-foreground">{customer.toUpperCase()}</span>
+            {customerDetail && (
+              <button
+                type="button"
+                onClick={() => setInfoOpen(true)}
+                aria-label="Customer info"
+                className="text-gray-400 hover:text-brand transition-colors"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="16" x2="12" y2="12" />
+                  <line x1="12" y1="8" x2="12.01" y2="8" />
+                </svg>
+              </button>
+            )}
+          </div>
+          {infoOpen && customerDetail && (
+            <CustomerInfoModal customer={customer} detail={customerDetail} onClose={() => setInfoOpen(false)} />
+          )}
           <div className="flex flex-wrap items-center gap-2 text-sm text-foreground">
             <span className="font-medium">{event.eventId}</span>
             {eta && <span className="text-gray-500">• {eta}</span>}
