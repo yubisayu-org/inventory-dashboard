@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import type { ShippingRecord } from "@/lib/sheets"
 import { generateShippingLabel } from "@/lib/shipping-label"
+import { useModalDismiss } from "@/hooks/useModalDismiss"
 
 function LabelModal({
   record,
@@ -47,16 +48,7 @@ function LabelModal({
     }
   }, [record])
 
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) { if (e.key === "Escape") onClose() }
-    document.addEventListener("keydown", onKey)
-    const prev = document.body.style.overflow
-    document.body.style.overflow = "hidden"
-    return () => {
-      document.removeEventListener("keydown", onKey)
-      document.body.style.overflow = prev
-    }
-  }, [onClose])
+  useModalDismiss(onClose)
 
   return (
     <div
@@ -69,7 +61,6 @@ function LabelModal({
         role="dialog"
         aria-modal="true"
       >
-        {/* Header */}
         <div className="px-5 py-4 border-b border-cream-border shrink-0">
           <div className="text-sm font-semibold text-foreground">Label Pengiriman</div>
           <div className="text-xs text-gray-500 mt-0.5">
@@ -78,7 +69,6 @@ function LabelModal({
           </div>
         </div>
 
-        {/* Body */}
         {loading && (
           <div className="flex-1 flex items-center justify-center py-16 text-sm text-gray-400">
             Membuat label…
@@ -98,7 +88,6 @@ function LabelModal({
           />
         )}
 
-        {/* Footer */}
         <div className="px-5 py-3 border-t border-cream-border flex justify-end gap-2 shrink-0">
           {pdfUrl && (
             <a

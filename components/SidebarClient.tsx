@@ -11,131 +11,155 @@ const ROLE_LABELS: Record<Role, string> = {
   admin: "Admin",
 }
 
-const NAV_LINKS: { href: string; label: string; roles: Role[]; icon: React.ReactNode }[] = [
+type NavLink = { href: string; label: string; roles: Role[]; icon: React.ReactNode }
+type NavSection = { section: string | null; items: NavLink[] }
+
+const NAV_SECTIONS: NavSection[] = [
   {
-    href: "/dashboard",
-    label: "Dashboard",
-    roles: ["admin", "owner"],
-    icon: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="3" y="3" width="7" height="7" />
-        <rect x="14" y="3" width="7" height="7" />
-        <rect x="3" y="14" width="7" height="7" />
-        <rect x="14" y="14" width="7" height="7" />
-      </svg>
-    ),
+    section: null,
+    items: [
+      {
+        href: "/dashboard",
+        label: "Dashboard",
+        roles: ["admin", "owner"],
+        icon: (
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="7" height="7" />
+            <rect x="14" y="3" width="7" height="7" />
+            <rect x="3" y="14" width="7" height="7" />
+            <rect x="14" y="14" width="7" height="7" />
+          </svg>
+        ),
+      },
+    ],
   },
   {
-    href: "/dashboard/form-records",
-    label: "Form Records",
-    roles: ["admin", "owner"],
-    icon: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
-        <path d="M14 2v6h6" />
-        <path d="M16 13H8" /><path d="M16 17H8" /><path d="M10 9H8" />
-      </svg>
-    ),
+    section: "Input Order",
+    items: [
+      {
+        href: "/dashboard/products",
+        label: "Product",
+        roles: ["owner"],
+        icon: (
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z" />
+            <path d="m3.3 7 8.7 5 8.7-5" />
+            <path d="M12 22V12" />
+          </svg>
+        ),
+      },
+      {
+        href: "/dashboard/form-records",
+        label: "Form Records",
+        roles: ["admin", "owner"],
+        icon: (
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
+            <path d="M14 2v6h6" />
+            <path d="M16 13H8" /><path d="M16 17H8" /><path d="M10 9H8" />
+          </svg>
+        ),
+      },
+      {
+        href: "/dashboard/duplicate-form",
+        label: "List Order",
+        roles: ["admin", "owner"],
+        icon: (
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+          </svg>
+        ),
+      },
+      {
+        href: "/dashboard/invoice",
+        label: "Invoice",
+        roles: ["admin", "owner"],
+        icon: (
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
+            <path d="M14 2v6h6" />
+            <path d="M8 13h8" />
+            <path d="M8 17h5" />
+          </svg>
+        ),
+      },
+    ],
   },
   {
-    href: "/dashboard/duplicate-form",
-    label: "List Order",
-    roles: ["admin", "owner"],
-    icon: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="9" y="9" width="13" height="13" rx="2" />
-        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-      </svg>
-    ),
+    section: "Purchasing",
+    items: [
+      {
+        href: "/dashboard/purchasing",
+        label: "Purchasing",
+        roles: ["admin", "owner"],
+        icon: (
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z" />
+            <path d="M3 6h18" />
+            <path d="M16 10a4 4 0 0 1-8 0" />
+          </svg>
+        ),
+      },
+      {
+        href: "/dashboard/excess-purchase",
+        label: "Excess Purchase",
+        roles: ["admin", "owner"],
+        icon: (
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 3h2l.4 2M7 13h10l4-8H5.4" />
+            <circle cx="9" cy="21" r="1" />
+            <circle cx="20" cy="21" r="1" />
+            <path d="M9 13v4" />
+            <path d="M15 13v4" />
+          </svg>
+        ),
+      },
+    ],
   },
   {
-    href: "/dashboard/purchasing",
-    label: "Purchasing",
-    roles: ["admin", "owner"],
-    icon: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z" />
-        <path d="M3 6h18" />
-        <path d="M16 10a4 4 0 0 1-8 0" />
-      </svg>
-    ),
-  },
-  {
-    href: "/dashboard/arrive",
-    label: "Unit Arrive",
-    roles: ["admin", "owner"],
-    icon: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M12 2v20" /><path d="m17 15-5 5-5-5" />
-        <path d="M2 12h4" /><path d="M18 12h4" />
-      </svg>
-    ),
-  },
-  {
-    href: "/dashboard/ship",
-    label: "Ready to Ship",
-    roles: ["admin", "owner"],
-    icon: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M5 17H3a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2v3" />
-        <rect x="9" y="11" width="14" height="10" rx="1" />
-        <path d="m12 17 3-3 3 3" />
-        <path d="M15 14v6" />
-      </svg>
-    ),
-  },
-  {
-    href: "/dashboard/shipments",
-    label: "Shipments",
-    roles: ["admin", "owner"],
-    icon: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M21 10V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l2-1.14" />
-        <path d="M16.5 9.4 7.55 4.24" />
-        <polyline points="3.29 7 12 12 20.71 7" />
-        <line x1="12" y1="22" x2="12" y2="12" />
-        <circle cx="18.5" cy="15.5" r="2.5" />
-        <path d="M20.27 17.27 22 19" />
-      </svg>
-    ),
-  },
-  {
-    href: "/dashboard/excess-purchase",
-    label: "Excess Purchase",
-    roles: ["admin", "owner"],
-    icon: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M3 3h2l.4 2M7 13h10l4-8H5.4" />
-        <circle cx="9" cy="21" r="1" />
-        <circle cx="20" cy="21" r="1" />
-        <path d="M9 13v4" />
-        <path d="M15 13v4" />
-      </svg>
-    ),
-  },
-  {
-    href: "/dashboard/invoice",
-    label: "Invoice",
-    roles: ["admin", "owner"],
-    icon: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
-        <path d="M14 2v6h6" />
-        <path d="M8 13h8" />
-        <path d="M8 17h5" />
-      </svg>
-    ),
-  },
-  {
-    href: "/owner",
-    label: "Owner",
-    roles: ["owner"],
-    icon: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-        <circle cx="12" cy="7" r="4" />
-      </svg>
-    ),
+    section: "Shipping",
+    items: [
+      {
+        href: "/dashboard/arrive",
+        label: "Unit Arrive",
+        roles: ["admin", "owner"],
+        icon: (
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 2v20" /><path d="m17 15-5 5-5-5" />
+            <path d="M2 12h4" /><path d="M18 12h4" />
+          </svg>
+        ),
+      },
+      {
+        href: "/dashboard/ship",
+        label: "Ready to Ship",
+        roles: ["admin", "owner"],
+        icon: (
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M5 17H3a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2v3" />
+            <rect x="9" y="11" width="14" height="10" rx="1" />
+            <path d="m12 17 3-3 3 3" />
+            <path d="M15 14v6" />
+          </svg>
+        ),
+      },
+      {
+        href: "/dashboard/shipments",
+        label: "Shipments",
+        roles: ["admin", "owner"],
+        icon: (
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 10V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l2-1.14" />
+            <path d="M16.5 9.4 7.55 4.24" />
+            <polyline points="3.29 7 12 12 20.71 7" />
+            <line x1="12" y1="22" x2="12" y2="12" />
+            <circle cx="18.5" cy="15.5" r="2.5" />
+            <path d="M20.27 17.27 22 19" />
+          </svg>
+        ),
+      },
+    ],
   },
 ]
 
@@ -151,7 +175,9 @@ export default function SidebarClient({ user }: Props) {
   const [collapsed, setCollapsed] = useState(false)
   const pathname = usePathname()
 
-  const visibleLinks = NAV_LINKS.filter((l) => user.role && l.roles.includes(user.role))
+  const visibleSections = NAV_SECTIONS
+    .map((s) => ({ ...s, items: s.items.filter((l) => user.role && l.roles.includes(user.role)) }))
+    .filter((s) => s.items.length > 0)
 
   const initials = user.name
     ? user.name.split(" ").map((n) => n[0]).slice(0, 2).join("").toUpperCase()
@@ -195,28 +221,42 @@ export default function SidebarClient({ user }: Props) {
       </div>
 
       {/* Nav links */}
-      <nav className="flex-1 py-3 flex flex-col gap-0.5 px-2 overflow-y-auto">
-        {visibleLinks.map((link) => {
-          const isActive = pathname === link.href
-          return (
-            <Link
-              key={link.href}
-              href={link.href}
-              title={collapsed ? link.label : undefined}
-              className={`
-                flex items-center gap-3 px-2 py-2 rounded-md text-sm transition-colors
-                ${isActive
-                  ? "bg-brand-light text-brand font-medium"
-                  : "text-gray-600 hover:bg-brand-light hover:text-brand"
-                }
-                ${collapsed ? "justify-center" : ""}
-              `}
-            >
-              <span className="shrink-0">{link.icon}</span>
-              {!collapsed && <span className="truncate">{link.label}</span>}
-            </Link>
-          )
-        })}
+      <nav className="flex-1 py-3 flex flex-col overflow-y-auto px-2">
+        {visibleSections.map((section, si) => (
+          <div key={si} className={si > 0 ? "mt-4" : ""}>
+            {section.section && !collapsed && (
+              <p className="px-2 mb-1 text-[10px] font-semibold uppercase tracking-widest text-gray-400 select-none">
+                {section.section}
+              </p>
+            )}
+            {section.section && collapsed && (
+              <div className="my-2 mx-auto w-4 border-t border-cream-border" />
+            )}
+            <div className="flex flex-col gap-0.5">
+              {section.items.map((link) => {
+                const isActive = pathname === link.href
+                return (
+                  <Link
+                    key={link.href}
+                    href={link.href}
+                    title={collapsed ? link.label : undefined}
+                    className={`
+                      flex items-center gap-3 px-2 py-2 rounded-md text-sm transition-colors
+                      ${isActive
+                        ? "bg-brand-light text-brand font-medium"
+                        : "text-gray-600 hover:bg-brand-light hover:text-brand"
+                      }
+                      ${collapsed ? "justify-center" : ""}
+                    `}
+                  >
+                    <span className="shrink-0">{link.icon}</span>
+                    {!collapsed && <span className="truncate">{link.label}</span>}
+                  </Link>
+                )
+              })}
+            </div>
+          </div>
+        ))}
       </nav>
 
       {/* Profile + sign out */}

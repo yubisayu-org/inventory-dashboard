@@ -28,7 +28,7 @@ export default function InvoiceClient() {
     setResult(null)
     setSearched(true)
     try {
-      const res = await fetch(`/api/sheets/invoice?customer=${encodeURIComponent(trimmed)}`)
+      const res = await fetch(`/api/sheets/invoice?customer=${encodeURIComponent(trimmed)}`, { cache: "no-store" })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? "Failed to load")
       setResult(data as InvoiceResult)

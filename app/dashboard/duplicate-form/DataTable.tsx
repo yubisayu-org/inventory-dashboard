@@ -102,7 +102,7 @@ const INITIAL_STATE: TableState = {
 function tableReducer(state: TableState, action: TableAction): TableState {
   switch (action.type) {
     case "SET_ROWS":
-      return { ...state, rows: action.rows, busyRowNumber: null, currentPage: 1 }
+      return { ...state, rows: [...action.rows].reverse(), busyRowNumber: null, currentPage: 1 }
     case "BUSY_START":
       return { ...state, busyRowNumber: action.rowNumber }
     case "BUSY_END":
@@ -199,7 +199,7 @@ type EditForm = { event: string; customer: string; items: string; unit: string; 
 
 export default function DataTable() {
   const [table, dispatch] = useReducer(tableReducer, INITIAL_STATE)
-  const [fetchState, setFetchState] = useState<{ loading: boolean; error: string }>({ loading: true, error: "" })
+  const [fetchState, setFetchState] = useState<{ loading: boolean; error: string; refreshError: string }>({ loading: true, error: "", refreshError: "" })
   const options = useSheetOptions()
   const [editingRowNumber, setEditingRowNumber] = useState<number | null>(null)
   const [editForm, setEditForm] = useState<EditForm | null>(null)
@@ -207,6 +207,8 @@ export default function DataTable() {
   const [editError, setEditError] = useState("")
   const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set())
   const [bulkDeleting, setBulkDeleting] = useState(false)
+  const [showAll, setShowAll] = useState(false)
+  const showAllRef = useRef(false)
 
   const visibleColumns = useMemo(
     () => getVisibleColumns(table.columnVisibility),
@@ -229,23 +231,42 @@ export default function DataTable() {
   const hasActiveFilters  = table.filters.event || table.filters.customer || table.filters.items || table.search
   const activeFilterCount = [table.filters.event, table.filters.customer, table.filters.items].filter(Boolean).length
 
-  const loadRows = useCallback(async () => {
-    setFetchState({ loading: true, error: "" })
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 15_000)
+  const loadRows = useCallback(async (isRefresh = false) => {
+    setFetchState((s) => ({ ...s, loading: true, refreshError: "" }))
+    const url = showAllRef.current ? "/api/sheets/duplicate-form" : "/api/sheets/duplicate-form?limit=20"
+
+    async function attempt(): Promise<FormRow[]> {
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), 30_000)
+      try {
+        const res = await fetch(url, { signal: controller.signal, cache: "no-store" })
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error ?? "Failed to load rows")
+        return data.rows
+      } finally {
+        clearTimeout(timer)
+      }
+    }
+
     try {
-      const res  = await fetch("/api/sheets/duplicate-form", { signal: controller.signal })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error ?? "Failed to load rows")
-      dispatch({ type: "SET_ROWS", rows: data.rows })
-      setFetchState({ loading: false, error: "" })
+      let rows: FormRow[]
+      try {
+        rows = await attempt()
+      } catch {
+        // First attempt failed — wait briefly then retry once silently
+        await new Promise<void>((r) => setTimeout(r, 1_000))
+        rows = await attempt()
+      }
+      dispatch({ type: "SET_ROWS", rows })
+      setFetchState({ loading: false, error: "", refreshError: "" })
     } catch (err) {
-      const msg = err instanceof Error && err.name === "AbortError"
-        ? "Request timed out — please retry"
-        : err instanceof Error ? err.message : "Failed to load rows"
-      setFetchState({ loading: false, error: msg })
-    } finally {
-      clearTimeout(timer)
+      const msg =
+        err instanceof Error && err.name === "AbortError"
+          ? "Request timed out — please retry"
+          : err instanceof Error ? err.message : "Failed to load rows"
+      // On refresh, keep existing rows visible — only show inline warning
+      if (isRefresh) setFetchState((s) => ({ ...s, loading: false, refreshError: msg }))
+      else setFetchState({ loading: false, error: msg, refreshError: "" })
     }
   }, [])
 
@@ -360,7 +381,7 @@ export default function DataTable() {
       <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-4 text-sm text-red-700">
         <p className="font-medium mb-1">Failed to load data</p>
         <p>{fetchState.error}</p>
-        <button onClick={loadRows} className="mt-3 text-sm underline hover:no-underline">Retry</button>
+        <button onClick={() => loadRows()} className="mt-3 text-sm underline hover:no-underline">Retry</button>
       </div>
     )
   }
@@ -409,12 +430,24 @@ export default function DataTable() {
               </button>
             )}
 
+            <button
+              onClick={() => {
+                const next = !showAll
+                setShowAll(next)
+                showAllRef.current = next
+                loadRows(true)
+              }}
+              className="shrink-0 text-xs text-gray-400 hover:text-brand transition-colors underline underline-offset-2"
+            >
+              {showAll ? "Last 20" : "Show all"}
+            </button>
+
             <span className="text-xs text-gray-400 shrink-0">
               {sortedRows.length !== table.rows.length ? `${sortedRows.length} of ${table.rows.length}` : table.rows.length}{" "}
               {table.rows.length === 1 ? "order" : "orders"}
             </span>
 
-            <button onClick={loadRows} title="Refresh" className="p-1.5 text-gray-400 hover:text-brand transition-colors rounded">
+            <button onClick={() => loadRows(true)} title="Refresh" className="p-1.5 text-gray-400 hover:text-brand transition-colors rounded">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M21 12a9 9 0 1 1-6.22-8.56" /><polyline points="21 3 21 9 15 9" />
               </svg>
@@ -443,6 +476,14 @@ export default function DataTable() {
             </div>
           )}
         </div>
+
+        {/* Inline refresh error — shown when a background reload fails but rows are still visible */}
+        {fetchState.refreshError && (
+          <div className="flex items-center justify-between gap-3 px-4 py-2 border-b border-red-200 bg-red-50 text-xs text-red-600">
+            <span>Refresh failed: {fetchState.refreshError}</span>
+            <button onClick={() => loadRows(true)} className="underline hover:no-underline shrink-0">Retry</button>
+          </div>
+        )}
 
         {/* Table */}
         <div className="overflow-x-auto">
@@ -554,7 +595,6 @@ export default function DataTable() {
         <AddOrderDrawer
           options={options}
           onClose={() => dispatch({ type: "TOGGLE_ADD_DRAWER" })}
-          onSuccess={loadRows}
         />
       )}
     </div>
@@ -624,12 +664,13 @@ function CopyInvoiceRowButton({ row }: { row: FormRow }) {
   async function handleClick() {
     setState({ status: "loading" })
     try {
-      const res = await fetch(`/api/sheets/invoice?customer=${encodeURIComponent(row.customer)}`)
+      const res = await fetch(`/api/sheets/invoice?customer=${encodeURIComponent(row.customer)}`, { cache: "no-store" })
       const data: InvoiceResult = await res.json()
       if (!res.ok) throw new Error((data as { error?: string }).error ?? "Failed")
 
-      const event = data.events.find((e) => e.eventId === row.event)
-      if (!event) throw new Error(`No invoice for ${row.event}`)
+      // Use the most recent event — matches Invoice page which shows events newest-first
+      const event = data.events[data.events.length - 1]
+      if (!event) throw new Error(`No invoice found for ${row.customer}`)
 
       await copyToClipboard(event.message)
       setState({ status: "copied" })
@@ -759,7 +800,8 @@ function EditCell({ col, editForm, onChange, options, busy, error, onSave, onCan
           value={editForm.customer}
           onChange={(v) => onChange({ customer: v })}
           options={customerOptions}
-          placeholder="Search customer..."
+          placeholder="Search or type new customer..."
+          allowNewValue
         />
       )
     case "items":
@@ -820,10 +862,9 @@ function EditCell({ col, editForm, onChange, options, busy, error, onSave, onCan
 let _addLineId = 0
 function newAddLine() { return { id: _addLineId++, items: "", unit: "", note: "" } }
 
-function AddOrderDrawer({ options, onClose, onSuccess }: {
+function AddOrderDrawer({ options, onClose }: {
   options: SheetOptions | null
   onClose: () => void
-  onSuccess: () => Promise<void>
 }) {
   const [event, setEvent]       = useState("")
   const [customer, setCustomer] = useState("")
@@ -864,9 +905,8 @@ function AddOrderDrawer({ options, onClose, onSuccess }: {
       })
       if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? "Failed to save") }
       const count = lines.length
-      setFeedback({ type: "success", message: `${count} order${count === 1 ? "" : "s"} added` })
+      setFeedback({ type: "success", message: `${count} order${count === 1 ? "" : "s"} added — refresh to see` })
       setEvent(""); setCustomer(""); setLines([newAddLine()])
-      await onSuccess()
     } catch (err) {
       setFeedback({ type: "error", message: err instanceof Error ? err.message : "Failed to save" })
     } finally {
@@ -902,7 +942,8 @@ function AddOrderDrawer({ options, onClose, onSuccess }: {
             value={customer}
             onChange={(v) => { setCustomer(v); setFeedback(null) }}
             options={customerOptions}
-            placeholder="Search customer..."
+            placeholder="Search or type new customer..."
+            allowNewValue
           />
         </div>
 

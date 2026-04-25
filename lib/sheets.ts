@@ -9,6 +9,7 @@ const SHEET_CUSTOMERS = "Customer"
 const SHEET_ORDERS = "Duplicate_Form"
 const SHEET_INVOICE = "Order_JanganDisort_DifilterAja"
 const SHEET_SHIPPING = "Shipping_table"
+const SHEET_PRODUCTS_INDO = "Product_Indo"
 
 // Reuse a single client across requests so the OAuth token is cached
 // and not re-fetched on every call.
@@ -163,16 +164,20 @@ async function getDuplicateFormSheetId(): Promise<number> {
   return _duplicateFormSheetId
 }
 
-/** Read all data rows from Duplicate_Form. Returns rows with their 1-based sheet row numbers. */
-export async function getDuplicateFormRows(): Promise<FormRow[]> {
+/** Read data rows from Duplicate_Form. When `limit` is given, only the last N rows are returned. */
+export async function getDuplicateFormRows(limit?: number): Promise<FormRow[]> {
   const sheets = getSheetsClient()
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
     range: `${SHEET_ORDERS}!A2:L`,
   })
-  const values = res.data.values ?? []
+  const allValues = res.data.values ?? []
+  // Slice in memory — one API call regardless of limit
+  const values = limit && limit > 0 ? allValues.slice(-limit) : allValues
+  // 1-based sheet row of the first returned element (row 2 = first data row)
+  const startRow = 2 + allValues.length - values.length
   return values.map((row, i) => ({
-    rowNumber: i + 2, // row 1 is the header
+    rowNumber: startRow + i,
     event: String(row[0] ?? ""),
     customer: String(row[1] ?? ""),
     items: String(row[2] ?? ""),
@@ -985,6 +990,65 @@ export async function getShippingRecords(): Promise<ShippingRecord[]> {
       trackingNumber: String(row[10] ?? ""),
     }))
     .filter((r) => r.shippingId)
+}
+
+// ─── Product_Indo ────────────────────────────────────────────────────────────
+// Lives in a separate Google Spreadsheet (GOOGLE_PRODUCT_INDO_SPREADSHEET_ID).
+// Columns: A=Product, B=Store, C=Price
+
+const PRODUCT_INDO_SPREADSHEET_ID = process.env.GOOGLE_PRODUCT_INDO_SPREADSHEET_ID!
+
+export interface ProductIndoRow {
+  rowNumber: number
+  product: string
+  store: string
+  price: number
+}
+
+export async function getProductIndo(): Promise<ProductIndoRow[]> {
+  const sheets = getSheetsClient()
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: PRODUCT_INDO_SPREADSHEET_ID,
+    range: `${SHEET_PRODUCTS_INDO}!A2:C`,
+  })
+  return ((res.data.values ?? []) as string[][])
+    .map((row, i) => ({
+      rowNumber: i + 2,
+      product: String(row[0] ?? ""),
+      store: String(row[1] ?? ""),
+      price: Number(row[2] ?? 0) || 0,
+    }))
+    .filter((r) => r.product)
+}
+
+export async function addProductIndo(data: {
+  product: string
+  store: string
+  price: number
+}): Promise<{ rowNumber: number }> {
+  const sheets = getSheetsClient()
+  const res = await sheets.spreadsheets.values.append({
+    spreadsheetId: PRODUCT_INDO_SPREADSHEET_ID,
+    range: `${SHEET_PRODUCTS_INDO}!A:C`,
+    valueInputOption: "USER_ENTERED",
+    insertDataOption: "INSERT_ROWS",
+    requestBody: { values: [[data.product, data.store, data.price]] },
+  })
+  const match = (res.data.updates?.updatedRange ?? "").match(/A(\d+)/)
+  return { rowNumber: match ? Number(match[1]) : 0 }
+}
+
+export async function updateProductIndo(
+  rowNumber: number,
+  data: { product: string; store: string; price: number },
+): Promise<void> {
+  const sheets = getSheetsClient()
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: PRODUCT_INDO_SPREADSHEET_ID,
+    range: `${SHEET_PRODUCTS_INDO}!A${rowNumber}:C${rowNumber}`,
+    valueInputOption: "USER_ENTERED",
+    requestBody: { values: [[data.product, data.store, data.price]] },
+  })
 }
 
 export async function updateTrackingNumber(

@@ -239,7 +239,7 @@ export default function FormRecordsTable() {
   const loadRows = useCallback(async () => {
     setFetchState({ loading: true, error: "" })
     try {
-      const res = await fetch("/api/sheets/duplicate-form")
+      const res = await fetch("/api/sheets/duplicate-form", { cache: "no-store" })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? "Failed to load")
       dispatch({ type: "SET_ROWS", rows: data.rows })

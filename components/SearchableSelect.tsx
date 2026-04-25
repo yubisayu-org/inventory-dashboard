@@ -17,6 +17,8 @@ interface Props {
   disabled?: boolean
   /** Show a clear/reset option at the top of the list that sets value to "" */
   clearable?: boolean
+  /** Allow typing a value that doesn't exist in options and committing it */
+  allowNewValue?: boolean
 }
 
 export default function SearchableSelect({
@@ -26,10 +28,11 @@ export default function SearchableSelect({
   placeholder = "Select...",
   disabled = false,
   clearable = false,
+  allowNewValue = false,
 }: Props) {
   const selectedLabel = useMemo(
-    () => options.find((o) => o.value === value)?.label ?? "",
-    [options, value],
+    () => options.find((o) => o.value === value)?.label ?? (allowNewValue ? value : ""),
+    [options, value, allowNewValue],
   )
 
   const [open, setOpen] = useState(false)
@@ -45,6 +48,19 @@ export default function SearchableSelect({
   useEffect(() => {
     if (!open) setInputValue(selectedLabel)
   }, [selectedLabel, open])
+
+  // Stable refs so closeDropdown doesn't re-create on every keystroke
+  const inputValueRef = useRef(inputValue)
+  useEffect(() => { inputValueRef.current = inputValue }, [inputValue])
+
+  const selectedLabelRef = useRef(selectedLabel)
+  useEffect(() => { selectedLabelRef.current = selectedLabel }, [selectedLabel])
+
+  const onChangeRef = useRef(onChange)
+  useEffect(() => { onChangeRef.current = onChange }, [onChange])
+
+  const optionsRef = useRef(options)
+  useEffect(() => { optionsRef.current = options }, [options])
 
   // ---------- Filtering ----------
 
@@ -86,18 +102,35 @@ export default function SearchableSelect({
     setOpen(true)
   }
 
-  const selectedLabelRef = useRef(selectedLabel)
-  useEffect(() => { selectedLabelRef.current = selectedLabel }, [selectedLabel])
-
   const closeDropdown = useCallback(() => {
     setOpen(false)
-    setInputValue(selectedLabelRef.current)
-  }, [])
+    if (allowNewValue) {
+      const trimmed = inputValueRef.current.trim()
+      if (trimmed) {
+        // If it matches an existing option label (case-insensitive), select that option
+        const match = optionsRef.current.find(
+          (o) => o.label.toLowerCase() === trimmed.toLowerCase(),
+        )
+        if (match) {
+          onChangeRef.current(match.value)
+          setInputValue(match.label)
+        } else {
+          // Commit the raw typed text as a new value
+          onChangeRef.current(trimmed)
+          setInputValue(trimmed)
+        }
+      } else {
+        setInputValue(selectedLabelRef.current)
+      }
+    } else {
+      setInputValue(selectedLabelRef.current)
+    }
+  }, [allowNewValue])
 
   const selectOption = useCallback(
     (val: string) => {
       onChange(val)
-      const label = options.find((o) => o.value === val)?.label ?? ""
+      const label = options.find((o) => o.value === val)?.label ?? val
       setInputValue(label)
       setOpen(false)
       inputRef.current?.blur()
@@ -154,14 +187,15 @@ export default function SearchableSelect({
 
     const showClear = clearable && value && !debouncedQuery
     const clearOffset = showClear ? 1 : 0
-    const total = filtered.length + clearOffset
+    const showAddRow = allowNewValue && debouncedQuery && filtered.length === 0
+    const total = filtered.length + clearOffset + (showAddRow ? 1 : 0)
 
     if (e.key === "ArrowDown") {
       e.preventDefault()
-      setHighlightIdx((i) => (i + 1) % total)
+      setHighlightIdx((i) => (i + 1) % Math.max(total, 1))
     } else if (e.key === "ArrowUp") {
       e.preventDefault()
-      setHighlightIdx((i) => (i - 1 + total) % total)
+      setHighlightIdx((i) => (i - 1 + Math.max(total, 1)) % Math.max(total, 1))
     } else if (e.key === "Enter") {
       e.preventDefault()
       if (highlightIdx >= 0 && highlightIdx < total) {
@@ -170,9 +204,16 @@ export default function SearchableSelect({
         } else {
           const opt = filtered[highlightIdx - clearOffset]
           if (opt) selectOption(opt.value)
+          else if (showAddRow) {
+            // "Add" row is highlighted
+            selectOption(inputValue.trim())
+          }
         }
       } else if (filtered.length === 1 && debouncedQuery) {
         selectOption(filtered[0].value)
+      } else if (allowNewValue && inputValue.trim()) {
+        // Commit free-typed value directly
+        selectOption(inputValue.trim())
       }
     }
   }
@@ -180,6 +221,7 @@ export default function SearchableSelect({
   // ---------- Render ----------
 
   const showClearRow = clearable && value && !debouncedQuery
+  const showAddRow = allowNewValue && debouncedQuery !== "" && filtered.length === 0
 
   return (
     <div ref={wrapperRef} className="relative">
@@ -226,6 +268,18 @@ export default function SearchableSelect({
             {LARGE_LIST && !debouncedQuery ? (
               <li className="px-3 py-3 text-sm text-gray-400 text-center">
                 Type to search...
+              </li>
+            ) : showAddRow ? (
+              <li
+                onMouseDown={(e) => { e.preventDefault(); selectOption(inputValue.trim()) }}
+                className={`flex items-center gap-1.5 px-3 py-2 text-sm cursor-pointer transition-colors ${
+                  highlightIdx === 0 ? "bg-brand-light text-brand" : "text-foreground hover:bg-brand-light"
+                }`}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="shrink-0">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+                <span>Add <span className="font-medium">&ldquo;{inputValue.trim()}&rdquo;</span></span>
               </li>
             ) : filtered.length === 0 ? (
               <li className="px-3 py-3 text-sm text-gray-400 text-center">

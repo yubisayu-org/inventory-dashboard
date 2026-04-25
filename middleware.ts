@@ -16,11 +16,11 @@ export default auth((req) => {
   }
 
   // Owner-only routes: only "owner" role allowed
-  if (pathname.startsWith("/owner") && role !== "owner") {
+  if (pathname.startsWith("/dashboard/products") && role !== "owner") {
     return NextResponse.redirect(new URL("/dashboard", req.url))
   }
 })
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/owner/:path*"],
+  matcher: ["/dashboard/:path*"],
 }

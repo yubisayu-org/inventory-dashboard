@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const data = await getInvoiceForCustomer(instagramId)
-    return NextResponse.json(data)
+    return NextResponse.json(data, { headers: { "Cache-Control": "no-store" } })
   } catch (err) {
     console.error("Failed to load invoice:", err)
     return NextResponse.json({ error: "Failed to load invoice" }, { status: 500 })

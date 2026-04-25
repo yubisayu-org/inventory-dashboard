@@ -22,3 +22,11 @@ export function requireRole(session: Session): NextResponse | null {
   }
   return null
 }
+
+/** Verify the session user is an owner. Returns a 403 response if not. */
+export function requireOwner(session: Session): NextResponse | null {
+  if (session.user.role !== "owner") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  }
+  return null
+}
