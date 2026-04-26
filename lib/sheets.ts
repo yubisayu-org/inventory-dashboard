@@ -472,9 +472,9 @@ export async function deleteFormRow(rowNumber: number): Promise<void> {
 //   J=UnitArrive, K=UnitShip, L=UnitHold,
 //   M=OrderID, N=Price, O=Store, P=ForInvoicing,
 //   Q=Subtotal, R=Ongkir(per kg), S=Berat, T=Berat*Unit,
-//   U=ForPackingList, V=(spacer), W=Pembayaran,
-//   X=ETA, Y=Status, Z=TanggalKirim, AA=Resi, AB=Lainnya,
-//   AC=Total, AD=SisaPelunasan, AE=SubTotalBarang, AF=Invoice_DM
+//   U=ForPackingList, V=Pembayaran,
+//   W=ETA, X=Status, Y=TanggalKirim, Z=Resi, AA=Lainnya,
+//   AB=Total, AC=SisaPelunasan, AD=SubTotalBarang, AE=Invoice_DM
 const INV = {
   EVENT: 0,
   CUSTOMER: 1,
@@ -487,15 +487,15 @@ const INV = {
   SUBTOTAL: 16,
   ONGKIR: 17,
   BERAT_UNIT: 19,
-  PEMBAYARAN: 22,
-  ETA: 23,
-  STATUS: 24,
-  TANGGAL_KIRIM: 25,
-  RESI: 26,
-  BIAYA_LAINNYA: 27,
-  TOTAL: 28,
-  SISA_PELUNASAN: 29,
-  SUBTOTAL_BARANG: 30,
+  PEMBAYARAN: 21,
+  ETA: 22,
+  STATUS: 23,
+  TANGGAL_KIRIM: 24,
+  RESI: 25,
+  BIAYA_LAINNYA: 26,
+  TOTAL: 27,
+  SISA_PELUNASAN: 28,
+  SUBTOTAL_BARANG: 29,
 } as const
 
 export interface InvoiceOrderLine {
