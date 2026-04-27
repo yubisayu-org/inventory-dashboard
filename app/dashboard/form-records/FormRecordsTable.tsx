@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react"
 import type { FormRow } from "@/lib/sheets"
+import { useResizableColumns } from "@/hooks/useResizableColumns"
 
 // ---------------------------------------------------------------------------
 // Column definitions
@@ -256,6 +257,12 @@ export default function FormRecordsTable() {
     [state.columnVisibility],
   )
 
+  const { widths, startResize } = useResizableColumns({
+    index: 32, event: 100, customer: 130, items: 200, unit: 64,
+    unitBuy: 80, receipt: 130, unitArrive: 64, unitShip: 64, unitHold: 64,
+    note: 130, createdAt: 120, updatedAt: 120,
+  })
+
   const searched  = useMemo(() => applySearch(state.rows, state.search),  [state.rows, state.search])
   const filtered  = useMemo(() => applyFilters(searched, state.filters),  [searched, state.filters])
   const sorted    = useMemo(() => applySort(filtered, state.sort),         [filtered, state.sort])
@@ -482,7 +489,7 @@ export default function FormRecordsTable() {
           </p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="min-w-max w-full text-sm">
+            <table className="w-full text-sm" style={{ tableLayout: "fixed" }}>
               <thead>
                 <tr className="border-b border-cream-border text-left bg-cream">
                   {visibleColumns.map((col) => {
@@ -491,7 +498,8 @@ export default function FormRecordsTable() {
                     return (
                       <th
                         key={col.id}
-                        className={`px-4 py-3 text-xs font-medium text-gray-500 ${col.className ?? ""} ${sortable ? "cursor-pointer select-none group hover:text-foreground" : ""} ${col.numeric ? "text-right" : ""}`}
+                        className={`px-4 py-3 text-xs font-medium text-gray-500 relative select-none ${sortable ? "cursor-pointer group hover:text-foreground" : ""} ${col.numeric ? "text-right" : ""}`}
+                        style={{ width: widths[col.id] }}
                         onClick={sortable ? () => dispatch({ type: "TOGGLE_SORT", key: col.id as SortKey }) : undefined}
                       >
                         <span className="inline-flex items-center gap-1">
@@ -500,6 +508,10 @@ export default function FormRecordsTable() {
                             <SortIcon active={isActive} direction={state.sort?.direction} />
                           )}
                         </span>
+                        <div
+                          onMouseDown={(e) => { e.stopPropagation(); startResize(col.id, e) }}
+                          className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-brand/30 active:bg-brand/60"
+                        />
                       </th>
                     )
                   })}

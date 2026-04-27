@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import type { CustomerDetail, InvoiceEvent, InvoiceResult } from "@/lib/sheets"
 import { useCopyFeedback } from "@/hooks/useCopyFeedback"
+import { useResizableColumns } from "@/hooks/useResizableColumns"
 
 function formatNumber(n: number | null | undefined): string {
   const v = Number(n)
@@ -177,6 +178,7 @@ function EventCard({
 }) {
   const [infoOpen, setInfoOpen] = useState(false)
   const { eta, status, shipments, showShipments, orders, totals, invoice } = event
+  const { widths, startResize } = useResizableColumns({ order: 220, unit: 60, price: 100, subtotal: 100, ready: 60 })
   const shipmentCount = shipments.length
 
   return (
@@ -228,14 +230,29 @@ function EventCard({
 
       {/* Orders table */}
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full text-sm" style={{ tableLayout: "fixed" }}>
           <thead>
             <tr className="text-left text-xs text-gray-500 border-b border-cream-border">
-              <th className="px-4 py-2 font-medium">Order</th>
-              <th className="px-4 py-2 font-medium text-right">Unit</th>
-              <th className="px-4 py-2 font-medium text-right">Price</th>
-              <th className="px-4 py-2 font-medium text-right">Subtotal</th>
-              <th className="px-4 py-2 font-medium text-right">Ready</th>
+              <th className="px-4 py-2 font-medium relative select-none" style={{ width: widths.order }}>
+                Order
+                <div onMouseDown={(e) => startResize("order", e)} className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-brand/30 active:bg-brand/60" />
+              </th>
+              <th className="px-4 py-2 font-medium text-right relative select-none" style={{ width: widths.unit }}>
+                Unit
+                <div onMouseDown={(e) => startResize("unit", e)} className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-brand/30 active:bg-brand/60" />
+              </th>
+              <th className="px-4 py-2 font-medium text-right relative select-none" style={{ width: widths.price }}>
+                Price
+                <div onMouseDown={(e) => startResize("price", e)} className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-brand/30 active:bg-brand/60" />
+              </th>
+              <th className="px-4 py-2 font-medium text-right relative select-none" style={{ width: widths.subtotal }}>
+                Subtotal
+                <div onMouseDown={(e) => startResize("subtotal", e)} className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-brand/30 active:bg-brand/60" />
+              </th>
+              <th className="px-4 py-2 font-medium text-right relative select-none" style={{ width: widths.ready }}>
+                Ready
+                <div onMouseDown={(e) => startResize("ready", e)} className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-brand/30 active:bg-brand/60" />
+              </th>
             </tr>
           </thead>
           <tbody>

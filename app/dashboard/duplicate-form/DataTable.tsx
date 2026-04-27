@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react"
 import type { FormRow, InvoiceResult, SheetOptions } from "@/lib/sheets"
+import { useResizableColumns } from "@/hooks/useResizableColumns"
 import SearchableSelect from "@/components/SearchableSelect"
 import { useSheetOptions } from "@/hooks/useSheetOptions"
 import { copyToClipboard } from "@/lib/clipboard"
@@ -214,6 +215,11 @@ export default function DataTable() {
     () => getVisibleColumns(table.columnVisibility),
     [table.columnVisibility],
   )
+
+  const { widths, startResize } = useResizableColumns({
+    checkbox: 32, index: 32, event: 100, customer: 130, items: 200,
+    unit: 64, note: 130, createdAt: 120, updatedAt: 120, actions: 90,
+  })
 
   const searchedRows = useMemo(() => applySearch(table.rows, table.search),     [table.rows, table.search])
   const filteredRows = useMemo(() => applyFilters(searchedRows, table.filters), [searchedRows, table.filters])
@@ -487,20 +493,22 @@ export default function DataTable() {
 
         {/* Table */}
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm" style={{ tableLayout: "fixed" }}>
             <thead>
               <tr className="border-b border-cream-border bg-cream text-left">
-                <th className="pl-3 pr-1 py-2 w-8">
+                <th className="pl-3 pr-1 py-2 relative select-none" style={{ width: widths.checkbox }}>
                   <input
                     type="checkbox"
                     checked={allPageSelected}
                     onChange={toggleAllPage}
                     className="rounded border-gray-300 text-brand focus:ring-brand/30 cursor-pointer"
                   />
+                  <div onMouseDown={(e) => startResize("checkbox", e)} className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-brand/30 active:bg-brand/60" />
                 </th>
                 {visibleColumns.map((col) => (
-                  <th key={col.id} className={`px-3 py-2 text-xs font-medium text-gray-500 ${col.className ?? ""}`}>
+                  <th key={col.id} className={`px-3 py-2 text-xs font-medium text-gray-500 relative select-none ${col.className ?? ""}`} style={{ width: widths[col.id] }}>
                     {col.label}
+                    <div onMouseDown={(e) => startResize(col.id, e)} className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-brand/30 active:bg-brand/60" />
                   </th>
                 ))}
               </tr>

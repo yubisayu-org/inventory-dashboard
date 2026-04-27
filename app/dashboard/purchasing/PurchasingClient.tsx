@@ -3,6 +3,7 @@
 import { useState } from "react"
 import SearchableSelect from "@/components/SearchableSelect"
 import { useSheetOptions } from "@/hooks/useSheetOptions"
+import { useResizableColumns } from "@/hooks/useResizableColumns"
 
 type ItemLine = { id: number; item: string; qty: string }
 type UpdatedRow = { rowNumber: number; customer: string; oldUnitBuy: number; unitBuy: number }
@@ -214,35 +215,53 @@ export default function PurchasingClient() {
                   No eligible orders found.
                 </p>
               ) : (
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-cream-border text-left">
-                      <th className="px-5 py-2 text-xs font-medium text-gray-500 w-8">#</th>
-                      <th className="px-5 py-2 text-xs font-medium text-gray-500">Customer</th>
-                      <th className="px-5 py-2 text-xs font-medium text-gray-500 text-right">Unit Buy</th>
-                      <th className="px-5 py-2 text-xs font-medium text-gray-500 w-20"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {itemResult.rows.map((row, i) => (
-                      <tr key={row.rowNumber} className="border-b border-cream-border last:border-0">
-                        <td className="px-5 py-2.5 text-xs text-gray-400">{i + 1}</td>
-                        <td className="px-5 py-2.5 text-foreground">{row.customer}</td>
-                        <td className="px-5 py-2.5 text-foreground text-right font-medium">{row.unitBuy}</td>
-                        <td className="px-5 py-2.5 text-right">
-                          {row.oldUnitBuy > 0 && (
-                            <span className="text-xs text-gray-400">(was {row.oldUnitBuy})</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <PurchaseResultTable rows={itemResult.rows} />
               )}
             </div>
           ))}
         </div>
       )}
     </div>
+  )
+}
+
+function PurchaseResultTable({ rows }: { rows: UpdatedRow[] }) {
+  const { widths, startResize } = useResizableColumns({ index: 40, customer: 160, unitBuy: 100, change: 80 })
+  return (
+    <table className="w-full text-sm" style={{ tableLayout: "fixed" }}>
+      <thead>
+        <tr className="border-b border-cream-border text-left">
+          <th className="px-5 py-2 text-xs font-medium text-gray-500 relative select-none" style={{ width: widths.index }}>
+            #
+            <div onMouseDown={(e) => startResize("index", e)} className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-brand/30 active:bg-brand/60" />
+          </th>
+          <th className="px-5 py-2 text-xs font-medium text-gray-500 relative select-none" style={{ width: widths.customer }}>
+            Customer
+            <div onMouseDown={(e) => startResize("customer", e)} className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-brand/30 active:bg-brand/60" />
+          </th>
+          <th className="px-5 py-2 text-xs font-medium text-gray-500 text-right relative select-none" style={{ width: widths.unitBuy }}>
+            Unit Buy
+            <div onMouseDown={(e) => startResize("unitBuy", e)} className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-brand/30 active:bg-brand/60" />
+          </th>
+          <th className="px-5 py-2 text-xs font-medium text-gray-500 relative select-none" style={{ width: widths.change }}>
+            <div onMouseDown={(e) => startResize("change", e)} className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-brand/30 active:bg-brand/60" />
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row, i) => (
+          <tr key={row.rowNumber} className="border-b border-cream-border last:border-0">
+            <td className="px-5 py-2.5 text-xs text-gray-400">{i + 1}</td>
+            <td className="px-5 py-2.5 text-foreground">{row.customer}</td>
+            <td className="px-5 py-2.5 text-foreground text-right font-medium">{row.unitBuy}</td>
+            <td className="px-5 py-2.5 text-right">
+              {row.oldUnitBuy > 0 && (
+                <span className="text-xs text-gray-400">(was {row.oldUnitBuy})</span>
+              )}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   )
 }

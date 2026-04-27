@@ -5,6 +5,7 @@ import type { ShippingRecord } from "@/lib/sheets"
 import { generateShippingLabel, generateMultipleShippingLabels } from "@/lib/shipping-label"
 import type { ShippingLabelParams } from "@/lib/shipping-label"
 import { useModalDismiss } from "@/hooks/useModalDismiss"
+import { useResizableColumns } from "@/hooks/useResizableColumns"
 
 type SortKey = "shippingId" | "event" | "customer" | "weightEstimation" | "ongkirTotal" | "createdAt"
 type ResiFilter = "all" | "filled" | "empty"
@@ -246,6 +247,12 @@ export default function ShipmentsClient() {
 
   const hasFilters = search || eventFilter || resiFilter !== "all"
 
+  const { widths, startResize } = useResizableColumns({
+    checkbox: 40, shippingId: 70, event: 120, customer: 140,
+    items: 200, weightEstimation: 80, ongkirTotal: 110,
+    isLastShipment: 80, resi: 180, createdAt: 160, action: 44,
+  })
+
   return (
     <div className="flex flex-col gap-4">
       {/* Filters + actions toolbar */}
@@ -340,27 +347,39 @@ export default function ShipmentsClient() {
           ) : (
             <div className="rounded-xl border border-cream-border bg-white overflow-hidden">
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="w-full text-sm" style={{ tableLayout: "fixed" }}>
                   <thead>
                     <tr className="text-left text-xs text-gray-500 border-b border-cream-border bg-cream">
-                      <th className="pl-4 pr-2 py-3 w-8">
+                      <th className="pl-4 pr-2 py-3 relative select-none" style={{ width: widths.checkbox }}>
                         <input
                           type="checkbox"
                           checked={allSelected}
                           onChange={toggleSelectAll}
                           className="rounded border-gray-300 text-brand focus:ring-brand/30 cursor-pointer"
                         />
+                        <div onMouseDown={(e) => startResize("checkbox", e)} className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-brand/30 active:bg-brand/60" />
                       </th>
-                      <SortTh label="ID" sortKey="shippingId" current={sortKey} dir={sortDir} onSort={handleSort} />
-                      <SortTh label="Event" sortKey="event" current={sortKey} dir={sortDir} onSort={handleSort} />
-                      <SortTh label="Customer" sortKey="customer" current={sortKey} dir={sortDir} onSort={handleSort} />
-                      <th className="px-4 py-3 font-medium">Items</th>
-                      <SortTh label="Berat" sortKey="weightEstimation" current={sortKey} dir={sortDir} onSort={handleSort} align="right" />
-                      <SortTh label="Ongkir" sortKey="ongkirTotal" current={sortKey} dir={sortDir} onSort={handleSort} align="right" />
-                      <th className="px-4 py-3 font-medium">Terakhir</th>
-                      <th className="px-4 py-3 font-medium">Resi</th>
-                      <SortTh label="Tanggal" sortKey="createdAt" current={sortKey} dir={sortDir} onSort={handleSort} />
-                      <th className="px-4 py-3 font-medium"></th>
+                      <SortTh label="ID" sortKey="shippingId" current={sortKey} dir={sortDir} onSort={handleSort} width={widths.shippingId} onStartResize={(e) => startResize("shippingId", e)} />
+                      <SortTh label="Event" sortKey="event" current={sortKey} dir={sortDir} onSort={handleSort} width={widths.event} onStartResize={(e) => startResize("event", e)} />
+                      <SortTh label="Customer" sortKey="customer" current={sortKey} dir={sortDir} onSort={handleSort} width={widths.customer} onStartResize={(e) => startResize("customer", e)} />
+                      <th className="px-4 py-3 font-medium relative select-none" style={{ width: widths.items }}>
+                        Items
+                        <div onMouseDown={(e) => startResize("items", e)} className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-brand/30 active:bg-brand/60" />
+                      </th>
+                      <SortTh label="Berat" sortKey="weightEstimation" current={sortKey} dir={sortDir} onSort={handleSort} align="right" width={widths.weightEstimation} onStartResize={(e) => startResize("weightEstimation", e)} />
+                      <SortTh label="Ongkir" sortKey="ongkirTotal" current={sortKey} dir={sortDir} onSort={handleSort} align="right" width={widths.ongkirTotal} onStartResize={(e) => startResize("ongkirTotal", e)} />
+                      <th className="px-4 py-3 font-medium relative select-none" style={{ width: widths.isLastShipment }}>
+                        Terakhir
+                        <div onMouseDown={(e) => startResize("isLastShipment", e)} className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-brand/30 active:bg-brand/60" />
+                      </th>
+                      <th className="px-4 py-3 font-medium relative select-none" style={{ width: widths.resi }}>
+                        Resi
+                        <div onMouseDown={(e) => startResize("resi", e)} className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-brand/30 active:bg-brand/60" />
+                      </th>
+                      <SortTh label="Tanggal" sortKey="createdAt" current={sortKey} dir={sortDir} onSort={handleSort} width={widths.createdAt} onStartResize={(e) => startResize("createdAt", e)} />
+                      <th className="px-4 py-3 font-medium relative select-none" style={{ width: widths.action }}>
+                        <div onMouseDown={(e) => startResize("action", e)} className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-brand/30 active:bg-brand/60" />
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -397,6 +416,8 @@ function SortTh({
   dir,
   onSort,
   align = "left",
+  width,
+  onStartResize,
 }: {
   label: string
   sortKey: SortKey
@@ -404,10 +425,12 @@ function SortTh({
   dir: "asc" | "desc"
   onSort: (key: SortKey) => void
   align?: "left" | "right"
+  width?: number
+  onStartResize?: (e: React.MouseEvent) => void
 }) {
   const active = current === sortKey
   return (
-    <th className={`px-4 py-3 font-medium ${align === "right" ? "text-right" : ""}`}>
+    <th className={`px-4 py-3 font-medium relative select-none ${align === "right" ? "text-right" : ""}`} style={width != null ? { width } : undefined}>
       <button
         type="button"
         onClick={() => onSort(sortKey)}
@@ -418,6 +441,9 @@ function SortTh({
           {active ? (dir === "asc" ? "↑" : "↓") : <span className="text-gray-300">↕</span>}
         </span>
       </button>
+      {onStartResize && (
+        <div onMouseDown={onStartResize} className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-brand/30 active:bg-brand/60" />
+      )}
     </th>
   )
 }
@@ -562,8 +588,8 @@ function ShipmentRow({
           </button>
         )}
       </td>
-      <td className="px-4 py-3 text-xs text-gray-400 whitespace-nowrap">{record.createdAt}</td>
-      <td className="px-4 py-3">
+      <td className="px-4 py-3 text-xs text-gray-400 whitespace-nowrap overflow-hidden">{record.createdAt}</td>
+      <td className="px-2 py-3 text-center">
         <button
           type="button"
           onClick={() => setShowLabel(true)}

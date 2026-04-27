@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import type { ProductIndoRow } from "@/lib/sheets"
+import { useResizableColumns } from "@/hooks/useResizableColumns"
 
 const EMPTY_FORM = { product: "", store: "", price: "" }
 
@@ -38,6 +39,8 @@ export default function ProductsClient() {
     if (!data) return []
     return [...new Set(data.map((r) => r.store).filter(Boolean))].sort()
   }, [data])
+
+  const { widths, startResize } = useResizableColumns({ product: 200, store: 160, price: 120, action: 60 })
 
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault()
@@ -142,13 +145,24 @@ export default function ProductsClient() {
       {!loading && !error && data && data.length > 0 && (
         <div className="rounded-xl border border-cream-border bg-white overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm" style={{ tableLayout: "fixed" }}>
               <thead>
                 <tr className="text-left text-xs text-gray-500 border-b border-cream-border bg-cream">
-                  <th className="px-4 py-3 font-medium">Product</th>
-                  <th className="px-4 py-3 font-medium">Store</th>
-                  <th className="px-4 py-3 font-medium text-right">Price</th>
-                  <th className="px-4 py-3 font-medium"></th>
+                  <th className="px-4 py-3 font-medium relative select-none" style={{ width: widths.product }}>
+                    Product
+                    <div onMouseDown={(e) => startResize("product", e)} className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-brand/30 active:bg-brand/60" />
+                  </th>
+                  <th className="px-4 py-3 font-medium relative select-none" style={{ width: widths.store }}>
+                    Store
+                    <div onMouseDown={(e) => startResize("store", e)} className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-brand/30 active:bg-brand/60" />
+                  </th>
+                  <th className="px-4 py-3 font-medium text-right relative select-none" style={{ width: widths.price }}>
+                    Price
+                    <div onMouseDown={(e) => startResize("price", e)} className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-brand/30 active:bg-brand/60" />
+                  </th>
+                  <th className="px-4 py-3 font-medium relative select-none" style={{ width: widths.action }}>
+                    <div onMouseDown={(e) => startResize("action", e)} className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-brand/30 active:bg-brand/60" />
+                  </th>
                 </tr>
               </thead>
               <tbody>

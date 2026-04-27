@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import type { ShipCustomer, ShipOrdersParams } from "@/lib/sheets"
 import { generateShippingLabel } from "@/lib/shipping-label"
 import { useModalDismiss } from "@/hooks/useModalDismiss"
+import { useResizableColumns } from "@/hooks/useResizableColumns"
 
 type Segment = "all" | "not_arrived" | "ready" | "shipped"
 
@@ -182,6 +183,7 @@ function CustomerCard({
   const [expanded, setExpanded] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const { customerDetail } = c
+  const { widths, startResize } = useResizableColumns({ items: 200, unitArrive: 80, unitShip: 80, toShip: 80 })
 
   return (
     <div className="rounded-xl border border-cream-border bg-white overflow-hidden">
@@ -237,13 +239,25 @@ function CustomerCard({
 
       {/* Orders table */}
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full text-sm" style={{ tableLayout: "fixed" }}>
           <thead>
             <tr className="text-left text-xs text-gray-500 border-b border-cream-border">
-              <th className="px-4 py-2 font-medium">Item</th>
-              <th className="px-4 py-2 font-medium text-right">Arrive</th>
-              <th className="px-4 py-2 font-medium text-right">Shipped</th>
-              <th className="px-4 py-2 font-medium text-right">To Ship</th>
+              <th className="px-4 py-2 font-medium relative select-none" style={{ width: widths.items }}>
+                Item
+                <div onMouseDown={(e) => startResize("items", e)} className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-brand/30 active:bg-brand/60" />
+              </th>
+              <th className="px-4 py-2 font-medium text-right relative select-none" style={{ width: widths.unitArrive }}>
+                Arrive
+                <div onMouseDown={(e) => startResize("unitArrive", e)} className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-brand/30 active:bg-brand/60" />
+              </th>
+              <th className="px-4 py-2 font-medium text-right relative select-none" style={{ width: widths.unitShip }}>
+                Shipped
+                <div onMouseDown={(e) => startResize("unitShip", e)} className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-brand/30 active:bg-brand/60" />
+              </th>
+              <th className="px-4 py-2 font-medium text-right relative select-none" style={{ width: widths.toShip }}>
+                To Ship
+                <div onMouseDown={(e) => startResize("toShip", e)} className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-brand/30 active:bg-brand/60" />
+              </th>
             </tr>
           </thead>
           <tbody>

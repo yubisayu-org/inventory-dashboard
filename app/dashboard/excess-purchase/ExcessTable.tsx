@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import type { ExcessRow } from "@/lib/sheets"
+import { useResizableColumns } from "@/hooks/useResizableColumns"
 
 const ROWS_PER_PAGE = 20
 
@@ -122,6 +123,11 @@ export default function ExcessTable() {
       setBusyRow(null)
     }
   }
+
+  const { widths, startResize } = useResizableColumns({
+    index: 40, event: 120, items: 200, unitBuy: 80,
+    receipt: 140, createdAt: 110, updatedAt: 110, action: 90,
+  })
 
   const q = search.trim().toLowerCase()
   const filtered = q
@@ -260,17 +266,40 @@ export default function ExcessTable() {
           </p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm" style={{ tableLayout: "fixed" }}>
               <thead>
                 <tr className="border-b border-cream-border text-left bg-cream">
-                  <th className="px-4 py-3 text-xs font-medium text-gray-500 w-8">#</th>
-                  <th className="px-4 py-3 text-xs font-medium text-gray-500">Event</th>
-                  <th className="px-4 py-3 text-xs font-medium text-gray-500">Item</th>
-                  <th className="px-4 py-3 text-xs font-medium text-gray-500 text-right">Unit Buy</th>
-                  <th className="px-4 py-3 text-xs font-medium text-gray-500">Receipt</th>
-                  <th className="px-4 py-3 text-xs font-medium text-gray-500">Created At</th>
-                  <th className="px-4 py-3 text-xs font-medium text-gray-500">Updated At</th>
-                  <th className="px-4 py-3 w-24"></th>
+                  <th className="px-4 py-3 text-xs font-medium text-gray-500 relative select-none" style={{ width: widths.index }}>
+                    #
+                    <div onMouseDown={(e) => startResize("index", e)} className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-brand/30 active:bg-brand/60" />
+                  </th>
+                  <th className="px-4 py-3 text-xs font-medium text-gray-500 relative select-none" style={{ width: widths.event }}>
+                    Event
+                    <div onMouseDown={(e) => startResize("event", e)} className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-brand/30 active:bg-brand/60" />
+                  </th>
+                  <th className="px-4 py-3 text-xs font-medium text-gray-500 relative select-none" style={{ width: widths.items }}>
+                    Item
+                    <div onMouseDown={(e) => startResize("items", e)} className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-brand/30 active:bg-brand/60" />
+                  </th>
+                  <th className="px-4 py-3 text-xs font-medium text-gray-500 text-right relative select-none" style={{ width: widths.unitBuy }}>
+                    Unit Buy
+                    <div onMouseDown={(e) => startResize("unitBuy", e)} className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-brand/30 active:bg-brand/60" />
+                  </th>
+                  <th className="px-4 py-3 text-xs font-medium text-gray-500 relative select-none" style={{ width: widths.receipt }}>
+                    Receipt
+                    <div onMouseDown={(e) => startResize("receipt", e)} className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-brand/30 active:bg-brand/60" />
+                  </th>
+                  <th className="px-4 py-3 text-xs font-medium text-gray-500 relative select-none" style={{ width: widths.createdAt }}>
+                    Created At
+                    <div onMouseDown={(e) => startResize("createdAt", e)} className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-brand/30 active:bg-brand/60" />
+                  </th>
+                  <th className="px-4 py-3 text-xs font-medium text-gray-500 relative select-none" style={{ width: widths.updatedAt }}>
+                    Updated At
+                    <div onMouseDown={(e) => startResize("updatedAt", e)} className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-brand/30 active:bg-brand/60" />
+                  </th>
+                  <th className="px-4 py-3 relative select-none" style={{ width: widths.action }}>
+                    <div onMouseDown={(e) => startResize("action", e)} className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-brand/30 active:bg-brand/60" />
+                  </th>
                 </tr>
               </thead>
               <tbody>
