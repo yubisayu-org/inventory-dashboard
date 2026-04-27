@@ -1,9 +1,13 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import type { ShippingRecord } from "@/lib/sheets"
-import { generateShippingLabel } from "@/lib/shipping-label"
+import { generateShippingLabel, generateMultipleShippingLabels } from "@/lib/shipping-label"
+import type { ShippingLabelParams } from "@/lib/shipping-label"
 import { useModalDismiss } from "@/hooks/useModalDismiss"
+
+type SortKey = "shippingId" | "event" | "customer" | "weightEstimation" | "ongkirTotal" | "createdAt"
+type ResiFilter = "all" | "filled" | "empty"
 
 function LabelModal({
   record,
@@ -115,6 +119,14 @@ export default function ShipmentsClient() {
   const [data, setData] = useState<ShippingRecord[] | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set())
+  const [printingPdf, setPrintingPdf] = useState(false)
+
+  const [search, setSearch] = useState("")
+  const [eventFilter, setEventFilter] = useState("")
+  const [resiFilter, setResiFilter] = useState<ResiFilter>("all")
+  const [sortKey, setSortKey] = useState<SortKey>("createdAt")
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
 
   async function load() {
     setLoading(true)
@@ -123,7 +135,8 @@ export default function ShipmentsClient() {
       const res = await fetch("/api/sheets/shipments")
       const json = await res.json()
       if (!res.ok) throw new Error(json.error ?? "Failed to load")
-      setData((json as ShippingRecord[]).reverse())
+      setData(json as ShippingRecord[])
+      setSelectedRows(new Set())
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load")
     } finally {
@@ -133,17 +146,171 @@ export default function ShipmentsClient() {
 
   useEffect(() => { load() }, [])
 
+  // Clear selection whenever filters change
+  useEffect(() => { setSelectedRows(new Set()) }, [search, eventFilter, resiFilter])
+
+  const events = useMemo(
+    () => [...new Set((data ?? []).map((r) => r.event).filter(Boolean))].sort(),
+    [data]
+  )
+
+  const displayed = useMemo(() => {
+    let rows = data ?? []
+
+    if (search) {
+      const q = search.replace(/^@/, "").toLowerCase()
+      rows = rows.filter((r) => r.customer.replace(/^@/, "").toLowerCase().includes(q))
+    }
+    if (eventFilter) rows = rows.filter((r) => r.event === eventFilter)
+    if (resiFilter === "filled") rows = rows.filter((r) => Boolean(r.trackingNumber))
+    if (resiFilter === "empty") rows = rows.filter((r) => !r.trackingNumber)
+
+    return [...rows].sort((a, b) => {
+      let cmp: number
+      switch (sortKey) {
+        case "shippingId":        cmp = a.shippingId.localeCompare(b.shippingId); break
+        case "event":             cmp = a.event.localeCompare(b.event); break
+        case "customer":          cmp = a.customer.localeCompare(b.customer); break
+        case "weightEstimation":  cmp = a.weightEstimation - b.weightEstimation; break
+        case "ongkirTotal":       cmp = a.ongkirTotal - b.ongkirTotal; break
+        case "createdAt":         cmp = a.createdAt.localeCompare(b.createdAt); break
+        default:                  cmp = 0
+      }
+      return sortDir === "asc" ? cmp : -cmp
+    })
+  }, [data, search, eventFilter, resiFilter, sortKey, sortDir])
+
+  function handleSort(key: SortKey) {
+    if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"))
+    else { setSortKey(key); setSortDir("asc") }
+  }
+
+  function toggleSelect(rowNumber: number) {
+    setSelectedRows((prev) => {
+      const next = new Set(prev)
+      if (next.has(rowNumber)) next.delete(rowNumber)
+      else next.add(rowNumber)
+      return next
+    })
+  }
+
+  const allRowNumbers = displayed.map((r) => r.rowNumber)
+  const allSelected = allRowNumbers.length > 0 && allRowNumbers.every((n) => selectedRows.has(n))
+
+  function toggleSelectAll() {
+    setSelectedRows(allSelected ? new Set() : new Set(allRowNumbers))
+  }
+
+  async function handlePrintPdf() {
+    const selected = displayed.filter((r) => selectedRows.has(r.rowNumber))
+    if (selected.length === 0) return
+    setPrintingPdf(true)
+    try {
+      const uniqueCustomers = [...new Set(selected.map((r) => r.customer))]
+      const detailEntries = await Promise.all(
+        uniqueCustomers.map(async (id) => {
+          try {
+            const res = await fetch(`/api/sheets/customer?id=${encodeURIComponent(id)}`)
+            return [id, res.ok ? await res.json() : null] as const
+          } catch {
+            return [id, null] as const
+          }
+        })
+      )
+      const detailMap = Object.fromEntries(detailEntries)
+      const labels: ShippingLabelParams[] = selected.map((r) => ({
+        event: r.event,
+        customer: r.customer,
+        shippingId: r.shippingId,
+        dataDiri: detailMap[r.customer]?.dataDiri ?? "",
+        packingLines: r.invoicing.split("\n").filter(Boolean),
+      }))
+      const blob = await generateMultipleShippingLabels(labels)
+      const url = URL.createObjectURL(blob)
+      try {
+        const a = document.createElement("a")
+        a.href = url
+        a.download = `labels-${new Date().toISOString().slice(0, 10)}.pdf`
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+      } finally {
+        URL.revokeObjectURL(url)
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to generate PDF")
+    } finally {
+      setPrintingPdf(false)
+    }
+  }
+
+  const hasFilters = search || eventFilter || resiFilter !== "all"
+
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex justify-end">
-        <button
-          type="button"
-          onClick={load}
-          disabled={loading}
-          className="text-xs text-gray-500 hover:text-brand disabled:opacity-50 transition-colors px-3 py-1.5 rounded-lg border border-cream-border hover:border-brand"
+      {/* Filters + actions toolbar */}
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Cari customer…"
+          className="flex-1 min-w-[160px] border border-cream-border rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand transition-colors"
+        />
+        <select
+          value={eventFilter}
+          onChange={(e) => setEventFilter(e.target.value)}
+          className="border border-cream-border rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand transition-colors text-gray-600"
         >
-          {loading ? "…" : "Refresh"}
-        </button>
+          <option value="">Semua Event</option>
+          {events.map((ev) => (
+            <option key={ev} value={ev}>{ev}</option>
+          ))}
+        </select>
+        <select
+          value={resiFilter}
+          onChange={(e) => setResiFilter(e.target.value as ResiFilter)}
+          className="border border-cream-border rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand transition-colors text-gray-600"
+        >
+          <option value="all">Semua Resi</option>
+          <option value="filled">Sudah diisi</option>
+          <option value="empty">Belum diisi</option>
+        </select>
+        {hasFilters && (
+          <button
+            type="button"
+            onClick={() => { setSearch(""); setEventFilter(""); setResiFilter("all") }}
+            className="text-xs text-gray-400 hover:text-brand transition-colors px-2 py-1.5"
+          >
+            Reset
+          </button>
+        )}
+
+        <div className="flex items-center gap-2 ml-auto">
+          {selectedRows.size > 0 && (
+            <button
+              type="button"
+              onClick={handlePrintPdf}
+              disabled={printingPdf}
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-white bg-brand hover:bg-brand/90 disabled:opacity-50 transition-colors px-3 py-1.5 rounded-lg"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="6 9 6 2 18 2 18 9" />
+                <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
+                <rect x="6" y="14" width="12" height="8" />
+              </svg>
+              {printingPdf ? "Generating…" : `Print ${selectedRows.size} Label${selectedRows.size === 1 ? "" : "s"}`}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={load}
+            disabled={loading}
+            className="text-xs text-gray-500 hover:text-brand disabled:opacity-50 transition-colors px-3 py-1.5 rounded-lg border border-cream-border hover:border-brand"
+          >
+            {loading ? "…" : "Refresh"}
+          </button>
+        </div>
       </div>
 
       {loading && (
@@ -160,52 +327,111 @@ export default function ShipmentsClient() {
         </div>
       )}
       {!loading && !error && data && data.length > 0 && (
-        <div className="rounded-xl border border-cream-border bg-white overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-xs text-gray-500 border-b border-cream-border bg-cream">
-                  <th className="px-4 py-3 font-medium">ID</th>
-                  <th className="px-4 py-3 font-medium">Event</th>
-                  <th className="px-4 py-3 font-medium">Customer</th>
-                  <th className="px-4 py-3 font-medium">Items</th>
-                  <th className="px-4 py-3 font-medium text-right">Berat</th>
-                  <th className="px-4 py-3 font-medium text-right">Ongkir</th>
-                  <th className="px-4 py-3 font-medium">Terakhir</th>
-                  <th className="px-4 py-3 font-medium">Resi</th>
-                  <th className="px-4 py-3 font-medium">Tanggal</th>
-                  <th className="px-4 py-3 font-medium"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.map((record) => (
-                  <ShipmentRow
-                    key={record.rowNumber}
-                    record={record}
-                    onUpdated={(trackingNumber) =>
-                      setData((prev) =>
-                        prev?.map((r) =>
-                          r.rowNumber === record.rowNumber ? { ...r, trackingNumber } : r
-                        ) ?? null
-                      )
-                    }
-                  />
-                ))}
-              </tbody>
-            </table>
+        <>
+          <div className="text-xs text-gray-400">
+            {displayed.length === data.length
+              ? `${data.length} shipment${data.length === 1 ? "" : "s"}`
+              : `${displayed.length} dari ${data.length} shipment`}
           </div>
-        </div>
+          {displayed.length === 0 ? (
+            <div className="rounded-xl border border-cream-border bg-white p-12 text-center text-gray-400 text-sm">
+              Tidak ada hasil yang cocok.
+            </div>
+          ) : (
+            <div className="rounded-xl border border-cream-border bg-white overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-xs text-gray-500 border-b border-cream-border bg-cream">
+                      <th className="pl-4 pr-2 py-3 w-8">
+                        <input
+                          type="checkbox"
+                          checked={allSelected}
+                          onChange={toggleSelectAll}
+                          className="rounded border-gray-300 text-brand focus:ring-brand/30 cursor-pointer"
+                        />
+                      </th>
+                      <SortTh label="ID" sortKey="shippingId" current={sortKey} dir={sortDir} onSort={handleSort} />
+                      <SortTh label="Event" sortKey="event" current={sortKey} dir={sortDir} onSort={handleSort} />
+                      <SortTh label="Customer" sortKey="customer" current={sortKey} dir={sortDir} onSort={handleSort} />
+                      <th className="px-4 py-3 font-medium">Items</th>
+                      <SortTh label="Berat" sortKey="weightEstimation" current={sortKey} dir={sortDir} onSort={handleSort} align="right" />
+                      <SortTh label="Ongkir" sortKey="ongkirTotal" current={sortKey} dir={sortDir} onSort={handleSort} align="right" />
+                      <th className="px-4 py-3 font-medium">Terakhir</th>
+                      <th className="px-4 py-3 font-medium">Resi</th>
+                      <SortTh label="Tanggal" sortKey="createdAt" current={sortKey} dir={sortDir} onSort={handleSort} />
+                      <th className="px-4 py-3 font-medium"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {displayed.map((record) => (
+                      <ShipmentRow
+                        key={record.rowNumber}
+                        record={record}
+                        isSelected={selectedRows.has(record.rowNumber)}
+                        onToggleSelect={() => toggleSelect(record.rowNumber)}
+                        onUpdated={(trackingNumber) =>
+                          setData((prev) =>
+                            prev?.map((r) =>
+                              r.rowNumber === record.rowNumber ? { ...r, trackingNumber } : r
+                            ) ?? null
+                          )
+                        }
+                      />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
+  )
+}
+
+function SortTh({
+  label,
+  sortKey,
+  current,
+  dir,
+  onSort,
+  align = "left",
+}: {
+  label: string
+  sortKey: SortKey
+  current: SortKey
+  dir: "asc" | "desc"
+  onSort: (key: SortKey) => void
+  align?: "left" | "right"
+}) {
+  const active = current === sortKey
+  return (
+    <th className={`px-4 py-3 font-medium ${align === "right" ? "text-right" : ""}`}>
+      <button
+        type="button"
+        onClick={() => onSort(sortKey)}
+        className={`inline-flex items-center gap-1 hover:text-brand transition-colors ${active ? "text-brand" : ""}`}
+      >
+        {label}
+        <span className="text-[10px] leading-none">
+          {active ? (dir === "asc" ? "↑" : "↓") : <span className="text-gray-300">↕</span>}
+        </span>
+      </button>
+    </th>
   )
 }
 
 function ShipmentRow({
   record,
   onUpdated,
+  isSelected,
+  onToggleSelect,
 }: {
   record: ShippingRecord
   onUpdated: (trackingNumber: string) => void
+  isSelected: boolean
+  onToggleSelect: () => void
 }) {
   const [editing, setEditing] = useState(false)
   const [value, setValue] = useState(record.trackingNumber)
@@ -247,7 +473,15 @@ function ShipmentRow({
   const fmt = (n: number) => n.toLocaleString("id-ID")
 
   return (
-    <tr className="border-b border-cream-border/60 hover:bg-cream/30 transition-colors">
+    <tr className={`border-b border-cream-border/60 transition-colors ${isSelected ? "bg-brand-light/20" : "hover:bg-cream/30"}`}>
+      <td className="pl-4 pr-2 py-3">
+        <input
+          type="checkbox"
+          checked={isSelected}
+          onChange={onToggleSelect}
+          className="rounded border-gray-300 text-brand focus:ring-brand/30 cursor-pointer"
+        />
+      </td>
       <td className="px-4 py-3 font-mono text-xs text-gray-500">{record.shippingId}</td>
       <td className="px-4 py-3 whitespace-nowrap">{record.event}</td>
       <td className="px-4 py-3 whitespace-nowrap">{record.customer}</td>
