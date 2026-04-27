@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
+import { useRouter } from "next/navigation"
 import type { ShipCustomer, ShipOrdersParams } from "@/lib/sheets"
 import { generateShippingLabel } from "@/lib/shipping-label"
 import { useModalDismiss } from "@/hooks/useModalDismiss"
@@ -23,12 +24,17 @@ function isShipped(c: ShipCustomer) {
 }
 
 export default function ShipClient() {
+  const router = useRouter()
   const [data, setData] = useState<ShipCustomer[] | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [segment, setSegment] = useState<Segment>("ready")
   const [search, setSearch] = useState("")
   const [eventFilter, setEventFilter] = useState("")
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [bulkShipping, setBulkShipping] = useState(false)
+  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null)
+  const [bulkError, setBulkError] = useState<string | null>(null)
 
   async function load() {
     setLoading(true)
@@ -78,6 +84,66 @@ export default function ShipClient() {
       return true
     })
   }, [data, segment, search, eventFilter])
+
+  const readyFiltered = useMemo(() => filtered.filter((c) => c.totalToShip > 0), [filtered])
+  const allSelected = readyFiltered.length > 0 && readyFiltered.every((c) => selected.has(`${c.customer}|${c.event}`))
+
+  function toggleSelect(key: string) {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  function toggleSelectAll() {
+    if (allSelected) {
+      setSelected(new Set())
+    } else {
+      setSelected(new Set(readyFiltered.map((c) => `${c.customer}|${c.event}`)))
+    }
+  }
+
+  async function handleBulkShip() {
+    const toShip = readyFiltered.filter((c) => selected.has(`${c.customer}|${c.event}`))
+    if (toShip.length === 0) return
+    setBulkShipping(true)
+    setBulkError(null)
+    setBulkProgress({ done: 0, total: toShip.length })
+    try {
+      for (const c of toShip) {
+        const params: ShipOrdersParams = {
+          customer: c.customer,
+          event: c.event,
+          orders: c.orders.map((o) => ({
+            rowNumber: o.rowNumber,
+            items: o.items,
+            rawOrder: o.rawOrder,
+            toShip: o.toShip,
+            unitShip: o.unitShip,
+          })),
+          weightKg: c.weightKg,
+          ongkirPerKg: c.ongkirPerKg,
+        }
+        const res = await fetch("/api/sheets/ship", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(params),
+        })
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}))
+          throw new Error(data.error ?? `Failed for ${c.customer}`)
+        }
+        setBulkProgress((prev) => prev ? { ...prev, done: prev.done + 1 } : null)
+      }
+      router.push("/dashboard/shipments")
+    } catch (err) {
+      setBulkError(err instanceof Error ? err.message : "Terjadi kesalahan")
+      setBulkShipping(false)
+      setBulkProgress(null)
+    }
+  }
 
   return (
     <div className="flex flex-col gap-4 max-w-3xl">
@@ -157,16 +223,52 @@ export default function ShipClient() {
       {/* Results */}
       {!loading && !error && filtered.length > 0 && (
         <>
-          <p className="text-sm text-gray-500">
-            <span className="font-semibold text-foreground">{filtered.length}</span> customer
-          </p>
-          {filtered.map((c) => (
-            <CustomerCard
-              key={`${c.customer}|${c.event}`}
-              customer={c}
-              onShipped={() => { setSegment("all"); load() }}
-            />
-          ))}
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm text-gray-500">
+              <span className="font-semibold text-foreground">{filtered.length}</span> customer
+            </p>
+            {readyFiltered.length > 0 && (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={toggleSelectAll}
+                  disabled={bulkShipping}
+                  className="text-xs text-gray-500 hover:text-brand transition-colors disabled:opacity-50"
+                >
+                  {allSelected ? "Deselect All" : "Select All"}
+                </button>
+                {selected.size > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleBulkShip}
+                    disabled={bulkShipping}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand text-white text-xs font-medium hover:bg-brand/90 disabled:opacity-50 transition-colors"
+                  >
+                    {bulkShipping && bulkProgress
+                      ? `Mengirim ${bulkProgress.done}/${bulkProgress.total}…`
+                      : `Ship ${selected.size} Customer${selected.size === 1 ? "" : "s"} →`}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+          {bulkError && (
+            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {bulkError}
+            </div>
+          )}
+          {filtered.map((c) => {
+            const key = `${c.customer}|${c.event}`
+            return (
+              <CustomerCard
+                key={key}
+                customer={c}
+                isSelected={selected.has(key)}
+                onToggleSelect={c.totalToShip > 0 ? () => toggleSelect(key) : undefined}
+                onShipped={() => { setSegment("all"); load() }}
+              />
+            )
+          })}
         </>
       )}
     </div>
@@ -175,9 +277,13 @@ export default function ShipClient() {
 
 function CustomerCard({
   customer: c,
+  isSelected,
+  onToggleSelect,
   onShipped,
 }: {
   customer: ShipCustomer
+  isSelected?: boolean
+  onToggleSelect?: () => void
   onShipped: () => void
 }) {
   const [expanded, setExpanded] = useState(false)
@@ -186,8 +292,17 @@ function CustomerCard({
   const { widths, startResize } = useResizableColumns({ items: 200, unitArrive: 80, unitShip: 80, toShip: 80 })
 
   return (
-    <div className="rounded-xl border border-cream-border bg-white overflow-hidden">
+    <div className={`rounded-xl border bg-white overflow-hidden transition-colors ${isSelected ? "border-brand" : "border-cream-border"}`}>
       <div className="px-5 py-4 bg-cream border-b border-cream-border flex items-start justify-between gap-4">
+        <div className="flex items-start gap-3 min-w-0">
+          {onToggleSelect && (
+            <input
+              type="checkbox"
+              checked={isSelected ?? false}
+              onChange={onToggleSelect}
+              className="mt-1 rounded border-gray-300 text-brand focus:ring-brand/30 cursor-pointer shrink-0"
+            />
+          )}
         <div className="flex flex-col gap-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-semibold text-foreground">{c.customer.toUpperCase()}</span>
@@ -214,6 +329,7 @@ function CustomerCard({
           {customerDetail?.whatsapp && (
             <div className="text-xs text-gray-500">{customerDetail.whatsapp}</div>
           )}
+        </div>
         </div>
         {c.totalToShip > 0 && (
           <div className="shrink-0 flex flex-col items-end gap-1">
